@@ -52,6 +52,8 @@ Parameter	Description
 🧾 Output
 
 Example technical report:
+```plaintext
+
 
 [Technical Analysis: .txt]
 ----------------------------------------
@@ -62,33 +64,34 @@ MRU List Validity:  Valid
 Handler Inventory:
   a: NOTEPAD.EXE [OK]
   b: Code.exe     [MISSING]
+```
 
-🔐 Security & Signing
+#### 🔐 Security & Signing
 
 This script supports safe execution in locked-down environments:
 
     Complies with AllSigned policies if digitally signed
 
     Use your enterprise code-signing certificate:
-
+```
 $cert = Get-ChildItem -Path Cert:\CurrentUser\My -CodeSigningCert
 Set-AuthenticodeSignature -FilePath .\ftype-audit.ps1 -Certificate $cert
-
-Module Packaging
+```
+#### Module Packaging
 
 To install as a reusable module:
 
-    Rename script to FtypeAudit.psm1
+- Rename script to `FtypeAudit.psm1`
 
-    Create a manifest:
-
+    + Create a manifest:
+```
 New-ModuleManifest -Path .\FtypeAudit.psd1 `
     -RootModule 'FtypeAudit.psm1' `
     -FunctionsToExport '*' `
     -Author 'Your Name' `
     -Description 'Safe file association analyzer and repair tool'
-
-    Import as needed:
-
+```
+- Import as needed:
+```
 Import-Module .\FtypeAudit.psd1
-
+```
