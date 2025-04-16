@@ -39,9 +39,9 @@ Requires: PowerShell 5.1+
 .LINK
 https://github.com/soyuz43/ftype-audit-safe
 #>
-[CmdletBinding(SupportsShouldProcess=$true)]
+[CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [Parameter(Position=0)]
+    [Parameter(Position = 0)]
     [string]$Path,
 
     [switch]$Explain,
@@ -54,7 +54,7 @@ param(
 )
 #region Elevation Check
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        [Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Warning "⚠️ Running without elevation - some registry keys may be inaccessible"
 }
 #endregion
@@ -88,15 +88,23 @@ function Get-SafeSemioticMap {
         $userChoicePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext\UserChoice"
         if (Test-Path $userChoicePath) {
             $userChoice = Get-ItemProperty $userChoicePath -ErrorAction Stop
-            if ($userChoice.ProgId -match '^[\w\.]+$') {
+            if ($userChoice.ProgId -match '^(AppX[\w]+|\w+(\.\w+)*)$') {
                 $map.UserChoice = $userChoice.ProgId
-            } else {
+            
+                # Optional: Add clarity if it's a UWP handler
+                if ($map.UserChoice -match '^AppX') {
+                    $map.UserChoice += " (UWP App - not resolved via HKCR)"
+                }
+            }
+            else {
                 $map.UserChoice = "<Invalid ProgId>"
                 $map.IsValid = $false
             }
+            
             $map.LastModified = (Get-Item $userChoicePath).LastWriteTime
         }
-    } catch {
+    }
+    catch {
         $map.UserChoice = "<Access Denied>"
         $map.IsValid = $false
     }
@@ -104,10 +112,22 @@ function Get-SafeSemioticMap {
     # System Truth Layer
     try {
         $sysDefault = (Get-ItemProperty "HKCR:\$ext" -ErrorAction Stop).'(default)'
-        $map.SystemDefault = if ($sysDefault) { $sysDefault } else { "<Empty>" }
-    } catch {
+        $map.SystemDefault = if ($sysDefault) { 
+            $sysDefault 
+        }
+        else { 
+            "<Empty>" 
+        }
+
+        # Mark AppX ProgIDs for UWP apps
+        if ($map.SystemDefault -match '^AppX') {
+            $map.SystemDefault += " (UWP App - may not have HKCR entry)"
+        }
+    }
+    catch {
         $map.SystemDefault = "<Not Found>"
     }
+
 
     # Memory Layer (MRU)
     $openWithPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext\OpenWithList"
@@ -120,25 +140,27 @@ function Get-SafeSemioticMap {
             $exePath = try { 
                 $cmd = Get-Command $_.Value -ErrorAction Stop
                 $cmd.Source
-            } catch { 
+            }
+            catch { 
                 $null 
             }
             $map.Handlers[$_.Name] = @{
-                Exe = $_.Value
+                Exe    = $_.Value
                 Exists = [bool]$exePath
-                Path = $exePath
+                Path   = $exePath
             }
         }
         $map.MRUList = $openWith.MRUList
         
         # Coherence check
-        $validMRU = $map.MRUList -replace '[^a-z]',''
+        $validMRU = $map.MRUList -replace '[^a-z]', ''
         $invalidCount = $validMRU.ToCharArray() | 
-            ForEach-Object { -not $map.Handlers.ContainsKey($_) } |
-            Where-Object { $_ -eq $true } |
-            Measure-Object | Select-Object -ExpandProperty Count
+        ForEach-Object { -not $map.Handlers.ContainsKey($_) } |
+        Where-Object { $_ -eq $true } |
+        Measure-Object | Select-Object -ExpandProperty Count
         $map.IsCoherent = ($invalidCount -eq 0)
-    } else {
+    }
+    else {
         $map.IsCoherent = $false
         $map.IsValid = $false
     }
@@ -171,14 +193,15 @@ function Backup-RegistryState {
         Invoke-Expression $backupCommand -ErrorAction Stop
         Write-Host "Backup created: $BackupPath" -ForegroundColor Green
         return $true
-    } catch {
+    }
+    catch {
         Write-Host "Backup failed: $_" -ForegroundColor Red
         return $false
     }
 }
 
 function Invoke-SafeClean {
-    [CmdletBinding(SupportsShouldProcess=$true)]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param($map)
     
     # Track ghost entries
@@ -239,7 +262,8 @@ if (-not $PSBoundParameters.ContainsKey('Path')) {
 
 $ext = if ([IO.Path]::GetExtension($Path)) { 
     [IO.Path]::GetExtension($Path) 
-} else { 
+}
+else { 
     if (-not $Path.StartsWith('.')) { ".$Path" } else { $Path } 
 }
 
@@ -248,7 +272,8 @@ $semioticMap = Get-SafeSemioticMap $ext
 
 if ($Literal) {
     Show-TechnicalReport $semioticMap
-} else {
+}
+else {
     # Show original cognitive report
 }
 
@@ -271,7 +296,8 @@ Current state analysis:
     if ($DryRun -or $Backup -or $Force) {
         Invoke-SafeClean $semioticMap
     }
-} else {
+}
+else {
     Write-Host "Invalid registry state detected - manual intervention recommended" -ForegroundColor Red
 }
 #endregion
