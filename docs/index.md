@@ -118,8 +118,10 @@ Import-AssociationPolicy -Path .\enterprise_rules.json
    Invoke-UserScopeAnalysis -CurrentUser
    ```
 
-### Best Practices
-```mermaid
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+
+<div class="mermaid">
 graph LR
 A[Start Audit] --> B{Admin Needed?}
 B -->|No| C[User-Level Scan]
@@ -129,7 +131,7 @@ D --> E
 E --> F{Changes Required?}
 F -->|Yes| G[Backup → Dry-Run → Apply]
 F -->|No| H[Generate Report]
-```
+</div>
 
 ---
 
