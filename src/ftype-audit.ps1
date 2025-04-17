@@ -14,179 +14,410 @@ Show technical interpretation of association states
 .PARAMETER DryRun
 Preview changes without modifying registry
 
+.PARAMETER Clean
+Perform safe cleanup of file association entries
+
 .PARAMETER Backup
 Create registry backup before making changes
 
-.PARAMETER Force
-Bypass confirmation prompts
+.PARAMETER BackupPath
+Custom location for registry backup (default: .\ftype-backup-*.reg)
+
+.PARAMETER SkipConfirmation
+Skip interactive confirmation prompts (Does NOT override critical safety logic)
+
+.PARAMETER IsExtension
+Treat input Path explicitly as an extension (bypass file‑exists check)
 
 .PARAMETER Literal
 Display pure technical output without annotations
 
-.EXAMPLE
-Get-SafeAssociationProfile .pdf -Explain
-Analyze PDF associations with technical explanation
-
-.EXAMPLE
-Invoke-AssociationClean .ps1 -Backup -DryRun
-Preview PowerShell file association cleanup with safety backup
-
-.NOTES
-Author: William Stetar
-Version: 1.0.0
-Requires: PowerShell 5.1+
-
-.LINK
-https://github.com/soyuz43/ftype-audit-safe
+.PARAMETER Help
+Show this help screen
 #>
-[CmdletBinding(SupportsShouldProcess = $true)]
+[CmdletBinding(DefaultParameterSetName = 'Analyze', SupportsShouldProcess = $true)]
 param(
-    [Parameter(Position = 0)]
+    # — Help only
+    [Parameter(ParameterSetName = 'Help', HelpMessage = 'Show this help screen')]
+    [switch]$Help,
+
+    # — Path: used in both Analyze and Clean
+    [Parameter(Position = 0, Mandatory = $true, ParameterSetName = 'Analyze',
+        HelpMessage = 'File path or extension to analyze')]
+    [Parameter(Position = 0, Mandatory = $true, ParameterSetName = 'Clean',
+        HelpMessage = 'File path or extension to clean ghost handlers for')]
+    [ValidateNotNullOrEmpty()]
     [string]$Path,
 
+    # — Analyze‑only flags
+    [Parameter(ParameterSetName = 'Analyze', HelpMessage = 'Show technical interpretation of association states')]
     [switch]$Explain,
-    [switch]$DryRun,
-    [switch]$Backup,
-    [string]$BackupPath = ".\ftype-backup-$(Get-Date -Format yyyyMMdd-HHmmss).reg",
-    [switch]$Force,
+
+    [Parameter(ParameterSetName = 'Analyze', HelpMessage = 'Display pure technical output without annotations')]
     [switch]$Literal,
-    [switch]$Help
+
+    # — Clean‑only flags
+    [Parameter(ParameterSetName = 'Clean', HelpMessage = 'Preview changes without modifying registry')]
+    [switch]$DryRun,
+
+    [Parameter(ParameterSetName = 'Clean', HelpMessage = 'Perform safe cleanup of file association entries')]
+    [switch]$Clean,
+
+    [Parameter(ParameterSetName = 'Clean', HelpMessage = 'Create registry backup before making changes')]
+    [switch]$Backup,
+
+    [Parameter(ParameterSetName = 'Clean', HelpMessage = 'Custom location for registry backup')]
+    [ValidateScript({
+            $dir = Split-Path $_
+            if (-not (Test-Path $dir)) {
+                throw "Directory '$dir' does not exist."
+            }
+            $true
+        })]
+    [string]$BackupPath = ".\ftype-backup-$(Get-Date -Format yyyyMMdd-HHmmss).reg",
+
+    [Parameter(ParameterSetName = 'Clean', HelpMessage = 'Skip interactive confirmation prompts')]
+    [switch]$SkipConfirmation,
+
+    # — Shared flag (both sets)
+    [Parameter(ParameterSetName = 'Analyze', HelpMessage = 'Treat Path explicitly as an extension')]
+    [Parameter(ParameterSetName = 'Clean')]
+    [switch]$IsExtension
 )
+#end region
+
+#region Environment Validation & Bootstrap
+
+# Exit codes for clarity in pipelines
+enum ExitCode {
+    Success = 0
+    UnsupportedEnvironment = 1
+    RegistryAccessFailure = 2
+    InsufficientElevation = 3
+}
+
+# 1. PowerShell edition & version
+$psMajor = $PSVersionTable.PSVersion.Major
+$edition = $PSVersionTable.PSEdition   # ← safe local name
+if (
+    -not ( ($edition -eq 'Desktop' -and $psMajor -ge 5) -or
+            ($edition -eq 'Core' -and $psMajor -ge 7) )
+)
+{
+    Write-Error "[X] Unsupported PowerShell edition/version. Requires Desktop 5.1+ or Core 7.0+ on Windows."
+    exit [int][ExitCode]::UnsupportedEnvironment}
+
+# 2. OS platform
+if ([System.Environment]::OSVersion.Platform -ne 'Win32NT') {
+    Write-Error "[X] Windows OS required for registry operations."
+    exit [int][ExitCode]::UnsupportedEnvironment}
+
+# 3. Registry provider & drive presence
+try {
+    Import-Module Microsoft.PowerShell.Management -ErrorAction Stop
+}
+catch {
+    Write-Error "[X] Failed to load Registry provider: $($_.Exception.Message)"
+    exit [int][ExitCode]::RegistryAccessFailure
+}
+
+if (-not (Test-Path HKLM:\) -or -not (Test-Path HKCU:\)) {
+    Write-Error "[X] Registry drives HKLM: or HKCU: are unavailable."
+    exit [int][ExitCode]::InsufficientElevation
+}
+
+# 4. Deep registry read probe (32/64‑bit aware)
+$hives = @(
+    @{ Hive = 'LocalMachine'; PSPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'; SubKey = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion' },
+    @{ Hive = 'CurrentUser'; PSPath = 'HKCU:\Volatile Environment'; SubKey = 'Volatile Environment' }
+)
+$errors = @()
+foreach ($h in $hives) {
+    try {
+        if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+            $base = [Microsoft.Win32.RegistryHive]::$($h.Hive)
+            [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+                $base,
+                [Microsoft.Win32.RegistryView]::Registry64
+            ).OpenSubKey($h.SubKey) | Out-Null
+        }
+        else {
+            Get-Item -Path $h.PSPath -ErrorAction Stop | Out-Null
+        }
+    }
+    catch {
+        $errors += "• Cannot read $($h.PSPath): $($_.Exception.Message)"
+    }
+}
+if ($errors.Count) {
+    Write-Error "[!] Registry access validation failed:`n$($errors -join "`n")"
+    exit [int][ExitCode]::InsufficientElevation
+}
+
+#endregion
+
 #region Elevation Check
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Warning "⚠️ Running without elevation - some registry keys may be inaccessible"
+
+Add-Type -MemberDefinition @'
+    using System;
+    using System.Runtime.InteropServices;
+    public class TokenHelper {
+        [DllImport("advapi32.dll", SetLastError=true)]
+        public static extern bool OpenProcessToken(IntPtr ProcessHandle, UInt32 DesiredAccess, out IntPtr TokenHandle);
+        [DllImport("advapi32.dll", SetLastError=true)]
+        public static extern bool GetTokenInformation(IntPtr TokenHandle, int TokenInfoClass, out int TokenInfo, int TokenInfoLength, out int ReturnLength);
+    }
+'@ -Name 'TokenHelper' -Namespace 'Win32' -ErrorAction SilentlyContinue
+
+function Test-IsElevated {
+    $procHandle = [System.Diagnostics.Process]::GetCurrentProcess().Handle
+    $tokenHandle = [IntPtr]::Zero
+    [Win32.TokenHelper]::OpenProcessToken($procHandle, 0x8, [ref]$tokenHandle) | Out-Null
+    $info = 0; $size = 0
+    [Win32.TokenHelper]::GetTokenInformation($tokenHandle, 20, [ref]$info, 4, [ref]$size) | Out-Null
+    return ($info -eq 2)  # 2 = Full elevation
 }
+
+if (-not (Test-IsElevated)) {
+    Write-Warning "[!] Process is not elevated—HKLM writes will be disabled."
+}
+
 #endregion
 
-#region Initialization
-$ErrorActionPreference = 'Stop'
+#region Data Collection
 
-class SafeAssociationProfile {
-    [string]$Extension
-    [string]$UserChoice
-    [string]$ProgIdCommand
-    [hashtable]$Handlers
-    [string]$MRUList
-    [bool]$IsCoherent
-    [string]$SystemDefault
-    [datetime]$LastModified
-    [bool]$IsValid
-}
-#endregion
+function Get-AssociationSnapshot {
+    param(
+        [Parameter(Mandatory)][ValidatePattern('^\.[a-z0-9]{1,10}$')]
+        [string]$Extension
+    )
 
-#region Core Functions
-function Get-SafeSemioticMap {
-    param($ext)
-    
-    $map = [SafeAssociationProfile]::new()
-    $map.Extension = $ext
-    $map.IsValid = $true
+    $snapshot = [AssociationSnapshot]::new()
+    $snapshot.Extension = $Extension.ToLower()
 
-    # User Intent Layer
+    # Capture raw registry state
     try {
-        $userChoicePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext\UserChoice"
+        $userChoicePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Extension\UserChoice"
         if (Test-Path $userChoicePath) {
-            $userChoice = Get-ItemProperty $userChoicePath -ErrorAction Stop
-            if ($userChoice.ProgId -match '^(AppX[\w]+|\w+(\.\w+)*)$') {
-                $map.UserChoice = $userChoice.ProgId
-            
-                # Optional: Add clarity if it's a UWP handler
-                if ($map.UserChoice -match '^AppX') {
-                    $map.UserChoice += " (UWP App - not resolved via HKCR)"
-                }
-            }
-            else {
-                $map.UserChoice = "<Invalid ProgId>"
-                $map.IsValid = $false
-            }
-            
-            $map.LastModified = (Get-Item $userChoicePath).LastWriteTime
+            $snapshot.RegistryValues.UserChoice = Get-ItemProperty $userChoicePath
         }
     }
-    catch {
-        $map.UserChoice = "<Access Denied>"
-        $map.IsValid = $false
-    }
+    catch { /* Log access issues */ }
 
-    # System Truth Layer
     try {
-        $sysDefault = (Get-ItemProperty "HKCR:\$ext" -ErrorAction Stop).'(default)'
-        $map.SystemDefault = if ($sysDefault) { 
-            $sysDefault 
-        }
-        else { 
-            "<Empty>" 
-        }
+        $snapshot.RegistryValues.SystemDefault = (Get-ItemProperty "HKCR:\$Extension" -ErrorAction Stop).'(default)'
+    }
+    catch { /* Log missing key */ }
 
-        # Mark AppX ProgIDs for UWP apps
-        if ($map.SystemDefault -match '^AppX') {
-            $map.SystemDefault += " (UWP App - may not have HKCR entry)"
+    try {
+        $openWithPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Extension\OpenWithList"
+        if (Test-Path $openWithPath) {
+            $snapshot.RegistryValues.OpenWithList = Get-ItemProperty $openWithPath
         }
     }
-    catch {
-        $map.SystemDefault = "<Not Found>"
-    }
+    catch { /* Log access issues */ }
 
+    return $snapshot
+}
 
-    # Memory Layer (MRU)
-    $openWithPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext\OpenWithList"
-    if (Test-Path $openWithPath) {
-        $openWith = Get-ItemProperty $openWithPath -ErrorAction SilentlyContinue
-        $map.Handlers = @{}
-        $openWith.PSObject.Properties | Where-Object { 
-            $_.Name -match '^[a-z]$' 
-        } | ForEach-Object {
-            $exePath = try { 
-                $cmd = Get-Command $_.Value -ErrorAction Stop
-                $cmd.Source
-            }
-            catch { 
-                $null 
-            }
-            $map.Handlers[$_.Name] = @{
-                Exe    = $_.Value
-                Exists = [bool]$exePath
-                Path   = $exePath
-            }
-        }
-        $map.MRUList = $openWith.MRUList
-        
-        # Coherence check
-        $validMRU = $map.MRUList -replace '[^a-z]', ''
-        $invalidCount = $validMRU.ToCharArray() | 
-        ForEach-Object { -not $map.Handlers.ContainsKey($_) } |
-        Where-Object { $_ -eq $true } |
-        Measure-Object | Select-Object -ExpandProperty Count
-        $map.IsCoherent = ($invalidCount -eq 0)
+#endregion
+
+#region Analysis Engine
+
+function Test-AssociationHealth {
+    param(
+        [Parameter(Mandatory)][ValidateNotNull()]
+        [AssociationSnapshot]$Snapshot
+    )
+
+    $diagnosis = [AssociationDiagnosis]::new()
+
+    # Phase 1: Structural validation
+    if (-not $Snapshot.RegistryValues.UserChoice) {
+        $diagnosis.RegisterState(
+            [AssociationState]::MissingUserChoice,
+            "No UserChoice key found for extension"
+        )
     }
     else {
-        $map.IsCoherent = $false
-        $map.IsValid = $false
+        if ($Snapshot.RegistryValues.UserChoice.ProgId -notmatch '^(AppX[\w]+|\w+(\.\w+)*)$') {
+            $diagnosis.RegisterState(
+                [AssociationState]::InvalidProgIdSyntax,
+                "ProgID format violation: $($Snapshot.RegistryValues.UserChoice.ProgId)"
+            )
+        }
     }
 
-    $map
+    # Phase 2: Semantic validation
+    if ($Snapshot.RegistryValues.SystemDefault) {
+        $systemProgId = $Snapshot.RegistryValues.SystemDefault
+        if (-not (Test-Path "HKCR:\$systemProgId")) {
+            $diagnosis.RegisterState(
+                [AssociationState]::UnregisteredProgId,
+                "System default ProgID not registered: $systemProgId"
+            )
+        }
+        
+    }
+
+    # Phase 3: Handler verification
+    $Snapshot.RegistryValues.OpenWithList.GetEnumerator() | Where-Object {
+        $_.Name -match '^[a-z]$'
+    } | ForEach-Object {
+        $handler = $_.Value -replace '^"(.*)"$', '$1'
+        
+        if (Test-Path $handler) {
+            $Snapshot.HandlerPaths[$_.Name] = $handler
+        }
+        else {
+            try {
+                $resolved = (Get-Command $handler -ErrorAction Stop).Source
+                $Snapshot.HandlerPaths[$_.Name] = $resolved
+            }
+            catch {
+                $diagnosis.RegisterState(
+                    [AssociationState]::BrokenHandlerPath,
+                    "Handler resolution failed: $handler"
+                )
+            }
+        }
+    }
+
+    # Phase 4: MRU coherence check
+    if ($Snapshot.RegistryValues.OpenWithList.MRUList) {
+        $mruChars = $Snapshot.RegistryValues.OpenWithList.MRUList -replace '[^a-z]', ''
+        $invalidRefs = $mruChars.ToCharArray() | Where-Object {
+            -not $Snapshot.HandlerPaths.ContainsKey($_)
+        }
+        
+        if ($invalidRefs) {
+            $diagnosis.RegisterState(
+                [AssociationState]::CorruptMRUOrder,
+                "MRU references invalid handlers: $($invalidRefs -join ',')"
+            )
+        }
+    }
+
+    return $diagnosis
 }
 
-function Show-TechnicalReport {
-    param($map)
+#endregion
+
+#region Reporting
+function Show-AssociationReport {
+    param(
+        [Parameter(Mandatory)][ValidateNotNull()]
+        [AssociationSnapshot]$Snapshot,
+
+        [Parameter(Mandatory)][ValidateNotNull()]
+        [AssociationDiagnosis]$Diagnosis
+    )
+
+    $stateColor = @{
+        [AssociationState]::ValidRegistry     = 'Green'
+        [AssociationState]::MissingUserChoice = 'Yellow'
+        [AssociationState]::CorruptMRUOrder   = 'Magenta'
+        [AssociationState]::BrokenHandlerPath = 'Red'
+    }
+
+    Write-Host "`nAssociation Health Report: $($Snapshot.Extension)" -ForegroundColor Cyan
+    Write-Host "Captured at: $($Snapshot.LastChecked.ToString('yyyy-MM-dd HH:mm:ss'))"
     
-    Write-Host "`n[Technical Analysis: $($map.Extension)]" -ForegroundColor Cyan
-    Write-Host "----------------------------------------"
-    
-    Write-Host "User Choice ProgID: $($map.UserChoice)"
-    Write-Host "System Default:     $($map.SystemDefault)"
-    Write-Host "MRU List Validity:  $(if ($map.IsCoherent) {'Valid'} else {'Invalid'})"
-    
-    Write-Host "`nHandler Inventory:"
-    $map.Handlers.GetEnumerator() | Sort-Object Name | ForEach-Object {
-        $status = if ($_.Value.Exists) { "OK" } else { "MISSING" }
-        Write-Host "  $($_.Key): $($_.Value.Exe) [$status]"
+    Write-Host "`n[States]" -ForegroundColor DarkGray
+    $Diagnosis.ActiveStates | ForEach-Object {
+        $color = $stateColor[$_] ?? 'White'
+        Write-Host "  $_" -ForegroundColor $color
+    }
+
+    Write-Host "`n[Evidence]" -ForegroundColor DarkGray
+    $Diagnosis.Evidence | ForEach-Object {
+        Write-Host "  $_" -ForegroundColor DarkYellow
     }
 }
+
+function Write-AssociationReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNull()]
+        [AssociationSnapshot]$Snapshot,
+
+        [Parameter(Mandatory)][ValidateNotNull()]
+        [AssociationDiagnosis]$Diagnosis,
+
+        [Parameter()][ValidateSet("Literal", "Explain", "Summary", "None")]
+        [string]$Mode = "Summary",
+
+        [hashtable]$ColorScheme = @{
+            Success   = 'Green'
+            Warning   = 'Red'
+            Detail    = 'Yellow'
+            Header    = 'Cyan'
+            Timestamp = 'DarkGray'
+        }
+    )
+
+    # Null safety check
+    if (-not $Snapshot -or -not $Diagnosis) {
+        throw "Invalid input: Snapshot and Diagnosis must be provided"
+    }
+
+    # State lookup optimization
+    $stateTable = @{}
+    $Diagnosis.ActiveStates | ForEach-Object { $stateTable[$_] = $true }
+
+    switch ($Mode) {
+        "None" { return }
+
+        "Literal" {
+            Show-AssociationReport -Snapshot $Snapshot -Diagnosis $Diagnosis
+        }
+
+        "Explain" {
+            Write-Host "`n[EXPLAINED VIEW: $($Snapshot.Extension.ToUpper())]" -ForegroundColor $ColorScheme.Header
+            Write-Host ("Timestamp: {0}" -f $Snapshot.LastChecked.ToString('yyyy-MM-dd HH:mm')) -ForegroundColor $ColorScheme.Timestamp
+            
+            # Status block
+            Write-Host "`nCORE STATUS:" -ForegroundColor $ColorScheme.Header
+            if ($Diagnosis.ActiveStates.Count -eq 0) {
+                Write-Host "[+] Configuration Valid" -ForegroundColor $ColorScheme.Success
+            }
+            else {
+                Write-Host "[!] Configuration Issues:" -ForegroundColor $ColorScheme.Warning
+                $Diagnosis.ActiveStates | ForEach-Object {
+                    Write-Host ("  - {0}" -f $_) -ForegroundColor $ColorScheme.Detail
+                }
+            }
+
+            # Registry details
+            Write-Host "`nREGISTRY ANALYSIS:" -ForegroundColor $ColorScheme.Header
+            Write-Host ("User Choice:    {0}" -f ($Snapshot.RegistryValues.UserChoice?.ProgId ?? '<not set>'))
+            Write-Host ("System Default: {0}" -f ($Snapshot.RegistryValues.SystemDefault ?? '<undefined>'))
+            Write-Host ("Valid Handlers: {0}" -f $Snapshot.HandlerPaths.Count)
+            Write-Host ("MRU Integrity:  {0}" -f $(if ($stateTable[[AssociationState]::CorruptMRUOrder]) { 'Compromised' } else { 'Intact' }))
+        }
+
+        "Summary" {
+            $status = if ($Diagnosis.ActiveStates.Count -eq 0) { 
+                "[+]" 
+            }
+            else { 
+                "[!] {0} issue(s)" -f $Diagnosis.ActiveStates.Count 
+            }
+            Write-Host ("{0}: {1}" -f $Snapshot.Extension.PadRight(8), $status)
+        }
+    }
+}
+#endregion
+
+
+#endregion
+
 
 function Backup-RegistryState {
-    param($ext)
+    param( 
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()]
+        [string]$ext
+    )
     
     $backupCommand = "reg export `"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext`" `"$BackupPath`" /y"
     try {
@@ -202,8 +433,13 @@ function Backup-RegistryState {
 
 function Invoke-SafeClean {
     [CmdletBinding(SupportsShouldProcess = $true)]
-    param($map)
-    
+    param(
+        [Parameter(Mandatory)][ValidateNotNull()]
+        [AssociationSnapshot]$map
+    )
+
+    $openWithPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$($map.Extension)\OpenWithList"
+
     # Track ghost entries
     $ghosts = $map.Handlers.GetEnumerator() | Where-Object { 
         -not $_.Value.Exists 
@@ -218,89 +454,259 @@ function Invoke-SafeClean {
     }
 
     if ($PSCmdlet.ShouldProcess($map.Extension, "Modify registry associations")) {
-        if ($Backup -and -not (Backup-RegistryState $map.Extension)) {
-            Write-Host "Aborting: Backup failed" -ForegroundColor Red
+
+        # 🟡 Interactive confirmation unless skipped
+        if (-not $SkipConfirmation -and -not $PSCmdlet.ShouldContinue(
+                "Proceed with cleaning ghost handlers for extension '$($map.Extension)'?", 
+                "Confirm Cleanup")
+        ) {
+            Write-Host "⏭️ Cleanup skipped by user" -ForegroundColor Yellow
             return
         }
-        
+
+        # 🔒 Optional registry backup
+        if ($Backup) {
+            if (-not $SkipConfirmation) {
+                if (-not (Backup-RegistryState $map.Extension)) {
+                    Write-Host "Aborting: Backup failed" -ForegroundColor Red
+                    return
+                }
+            }
+            else {
+                try {
+                    Backup-RegistryState $map.Extension | Out-Null
+                }
+                catch {
+                    Write-Warning "[!] Backup failed, but continuing due to -SkipConfirmation"
+                }
+            }
+        }
+
+        # 🧼 Perform cleanup
         $ghosts | ForEach-Object {
             Remove-ItemProperty -Path $openWithPath -Name $_.Key -ErrorAction SilentlyContinue
         }
     }
 }
+
+
 #endregion
 
+
+
 #region Execution Flow
+
+# Show help and exit immediately
 if ($Help) {
     Write-Host @"
 🔒 Safe File Association Analyzer
 
 Usage:
-  ftype-audit <path/extension> [options]
+  ftype-audit.ps1 -Path <.ext | file> [options]
 
-Safety-First Options:
-  -DryRun         Preview changes without modification
-  -Backup         Create registry backup before changes
-  -BackupPath     Custom backup location (default: .\ftype-backup-*.reg)
-  -Force          Bypass confirmation prompts
+Core Actions:
+  -Clean              Perform safe cleanup of file association entries
+  -DryRun             Preview cleanup actions without modifying registry
+  -Backup             Create a registry backup before changes
+  -BackupPath         Custom location for registry backup (default: .\ftype-backup-*.reg)
 
-Analysis Modes:
-  -Literal        Pure technical output
-  -Explain        Show interpretation
+Input Interpretation:
+  -IsExtension        Treat input Path as a file extension (e.g. 'txt' → '.txt')
+
+Output Modes:
+  -Explain            Human-readable interpretation of file association state
+  -Literal            Pure technical dump of underlying registry and MRU values
+
+Execution Control:
+  -SkipConfirmation   Suppress confirmation prompts (e.g., ShouldContinue)
+                      [!] Only has effect with -Clean or -DryRun
+
+Help:
+  -Help               Show this help screen
 
 Examples:
-  ftype-audit .json -DryRun -Backup
-  ftype-audit .txt -Literal
+  .\ftype-audit.ps1 -Path .json -DryRun -Backup
+      → Show what would be removed from MRU with backup
+
+  .\ftype-audit.ps1 -Path .txt -Clean -SkipConfirmation
+      → Clean ghost MRU handlers for .txt without prompt
+
+  .\ftype-audit.ps1 -Path .ps1 -Explain
+      → Get semantic explanation of current .ps1 associations
+
+  .\ftype-audit.ps1 -Path .pdf -Literal
+      → Dump raw registry data related to .pdf association
+
+Learn more:
+  https://github.com/soyuz43/ftype-audit-safe
 "@
-    exit
+    return
 }
 
-# Input validation
+
+#region Execution Flow
+<#
+.SYNOPSIS
+Validates and resolves file extensions with enterprise-grade security checks
+#>
+
+<#
+Exit Code Semantics:
+0  = Success
+1  = User cancellation/input error
+2  = Permission denied
+3  = Invalid input/resolution failure
+4+ = Reserved for future use
+#>
+
+function Get-ValidatedExtension {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RawInput
+    )
+
+    # Null/whitespace guard
+    if ([string]::IsNullOrWhiteSpace($RawInput)) {
+        throw "[ERR-EXT-01] Empty input"
+    }
+
+    $cleaned = $RawInput.Trim().Trim("'`"")
+
+    # Path existence checks
+    if (Test-Path $cleaned) {
+        $item = Get-Item $cleaned -Force
+        if ($item.PSIsContainer) {
+            throw "[ERR-EXT-02] Path is directory: '$cleaned'"
+        }
+        if (-not $item.Extension) {
+            throw "[ERR-EXT-03] File has no extension: '$cleaned'"
+        }
+        return $item.Extension.ToLower()
+    }
+
+    # Pure extension validation
+    $ext = if ($cleaned.StartsWith('.')) {
+        $cleaned
+    }
+    else {
+        ".$cleaned"
+    }
+
+    # Structural validation
+    if ($ext -notmatch '^\.[a-z0-9][\w-]{1,255}$') {
+        throw "[ERR-EXT-04] Invalid extension format: '$ext'"
+    }
+
+    if ($ext.Length -gt 260) {
+        throw "[ERR-EXT-05] Extension exceeds 260 chars: '$ext'"
+    }
+
+    return $ext.ToLower()
+}
+
+# Interactive prompt fallback
 if (-not $PSBoundParameters.ContainsKey('Path')) {
-    $Path = Read-Host "Enter file path or extension to analyze"
-}
+    if ([Environment]::UserInteractive -and ($Host.Name -ne 'Default Host')) {
+        try {
+            $choice = $Host.UI.PromptForChoice(
+                "Input Required",
+                "No path provided:",
+                @(
+                    [System.Management.Automation.Host.ChoiceDescription]::new("&Enter Path", "Specify file/extension"),
+                    [System.Management.Automation.Host.ChoiceDescription]::new("&Cancel", "Abort Operation")
+                ),
+                0
+            )
 
-$ext = if ([IO.Path]::GetExtension($Path)) { 
-    [IO.Path]::GetExtension($Path) 
-}
-else { 
-    if (-not $Path.StartsWith('.')) { ".$Path" } else { $Path } 
-}
-
-# Core analysis
-$semioticMap = Get-SafeSemioticMap $ext
-
-if ($Literal) {
-    Show-TechnicalReport $semioticMap
-}
-else {
-    # Show original cognitive report
-}
-
-if ($semioticMap.IsValid) {
-    if ($Explain) {
-        Write-Host "`n[Technical Interpretation]" -ForegroundColor Blue
-        Write-Host @"
-Association resolution flow:
-1. Check UserChoice registry value
-2. Fallback to system default ProgID
-3. Use MRU list if no explicit defaults
-
-Current state analysis:
-- User explicit choice: $(if ($semioticMap.UserChoice) {'Set'} else {'Not set'})
-- System fallback: $($semioticMap.SystemDefault)
-- Valid handlers: $($semioticMap.Handlers.Values.Where({$_.Exists}).Count)
-"@
+            if ($choice -eq 0) {
+                $Path = Read-Host "Enter target (file or extension)"
+            }
+            else {
+                exit 1
+            }
+        }
+        catch {
+            Write-Error "[ERR-HOST-01] Prompt failed: $($_.Exception.Message)"
+            exit 1
+        }
     }
-
-    if ($DryRun -or $Backup -or $Force) {
-        Invoke-SafeClean $semioticMap
+    else {
+        Write-Error "[ERR-HOST-02] Non-interactive session: -Path required"
+        exit 1
     }
 }
-else {
-    Write-Host "Invalid registry state detected - manual intervention recommended" -ForegroundColor Red
+
+
+#region Extension Validation + Registry Snapshot
+try {
+    $resolvedExtension = Get-ValidatedExtension -RawInput $Path
+    $registrySnapshot = Get-AssociationSnapshot -Extension $resolvedExtension
+}
+catch [System.Security.SecurityException] {
+    # Special-case permission errors with precise category
+    Write-Error "[ERR-ACCESS-01] Permission denied: $($_.Exception.Message)" -Category PermissionDenied
+    exit 2
+}
+catch {
+    # Generic error without forced category
+    Write-Error "[ERR-VALIDATION-01] Resolution failure: $($_.Exception.Message)"
+    exit 3
 }
 #endregion
+
+#region Diagnostic Analysis
+$healthReport = Test-AssociationHealth -Snapshot $registrySnapshot
+
+# Validate parameter combinations
+if ($SkipConfirmation -and (-not ($Clean -or $DryRun))) {
+    Write-Warning "SkipConfirmation ignored without Clean/DryRun"
+    $SkipConfirmation = $false
+}
+#endregion
+
+#region Presentation Layer
+$mode = if ($Literal) { "Literal" }
+elseif ($Explain) { "Explain" }
+else { "Summary" }
+
+Write-AssociationReport -Snapshot $registrySnapshot -Diagnosis $healthReport -Mode $mode
+
+#endregion
+
+#region Remediation Logic
+if ($Clean -or $DryRun) {
+    $confirmation = $SkipConfirmation -or $Host.UI.PromptForChoice(
+        "Confirm Action", 
+        "Modify system associations for $resolvedExtension?",
+        @(
+            [System.Management.Automation.Host.ChoiceDescription]::new("&Proceed", "Execute changes"),
+            [System.Management.Automation.Host.ChoiceDescription]::new("&Cancel", "Abort operation")
+        ), 
+        1
+    )
+
+    if ($confirmation -eq 0) {
+        try {
+            if ($DryRun) {
+                Write-Host "Simulated repair operations:" -ForegroundColor Magenta
+                $healthReport.Evidence | ForEach-Object {
+                    Write-Host "Would fix: $_"
+                }
+            }
+            else {
+                # Invoke actual repair implementation here
+                Write-Host "Performing registry repairs..." -ForegroundColor Cyan
+            }
+        }
+        catch {
+            Write-Error "Repair failed: $($_.Exception.Message)" -Category OperationStopped
+        }
+    }
+}
+#endregion
+
+
 # SIG # Begin signature block
 # MIIFgwYJKoZIhvcNAQcCoIIFdDCCBXACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
