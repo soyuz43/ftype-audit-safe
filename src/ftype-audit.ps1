@@ -82,8 +82,19 @@ param(
     # - Shared flag (both sets)
     [Parameter(ParameterSetName = 'Analyze', HelpMessage = 'Treat Path explicitly as an extension')]
     [Parameter(ParameterSetName = 'Clean')]
-    [switch]$IsExtension
+    [switch]$IsExtension,
+
+    # - Python cleanup tools
+    [Parameter(HelpMessage = 'Run Python residue audit and exit')]
+    [switch]$AuditPython
+
 )
+
+if ($AuditPython -and $PSCmdlet.ParameterSetName -ne '') {
+    Write-Error "The -AuditPython flag cannot be used with other operation modes."
+    exit 1
+}
+
 #end region
 
 #region Environment Validation & Bootstrap
@@ -153,8 +164,21 @@ if ($errors.Count) {
     Write-Error "[!] Registry access validation failed:`n$($errors -join "`n")"
     exit [int][ExitCode]::InsufficientElevation
 }
-
 #endregion
+
+#region Python Residue Tools
+if ($AuditPython) {
+    . "$PSScriptRoot\src\Cleanup-PythonResidue.ps1"
+
+    Test-PythonResiduals
+    Get-PythonPathInfo
+    Test-CommandExists -Command 'python'
+    Test-CommandExists -Command 'pip'
+
+    return [int][ExitCode]::Success
+}
+#endregion
+
 
 #region Elevation Check
 
@@ -219,11 +243,9 @@ function Get-AssociationSnapshot {
 
     return $snapshot
 }
-
 #endregion
 
 #region Analysis Engine
-
 function Test-AssociationHealth {
     param(
         [Parameter(Mandatory)][ValidateNotNull()]
@@ -300,11 +322,12 @@ function Test-AssociationHealth {
 
     return $diagnosis
 }
-
 #endregion
 
 #region Reporting
+
 function Show-AssociationReport {
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory)][ValidateNotNull()]
         [AssociationSnapshot]$Snapshot,
@@ -313,25 +336,24 @@ function Show-AssociationReport {
         [AssociationDiagnosis]$Diagnosis
     )
 
-    $stateColor = @{
-        [AssociationState]::ValidRegistry     = 'Green'
-        [AssociationState]::MissingUserChoice = 'Yellow'
-        [AssociationState]::CorruptMRUOrder   = 'Magenta'
-        [AssociationState]::BrokenHandlerPath = 'Red'
+    foreach ($state in $Diagnosis.ActiveStates) {
+        Write-Information "  $state" -InformationAction Continue
+    }
+    # Header
+    Write-Information "`nAssociation Health Report: $($Snapshot.Extension)" -InformationAction Continue
+    Write-Information ("Captured at: {0:yyyy-MM-dd HH:mm:ss}" -f $Snapshot.LastChecked) -InformationAction Continue
+
+
+    # States
+    Write-Information "`n[States]" -InformationAction Continue
+    foreach ($state in $Diagnosis.ActiveStates) {
+        Write-Information "  $state" -InformationAction Continue
     }
 
-    Write-Host "`nAssociation Health Report: $($Snapshot.Extension)" -ForegroundColor Cyan
-    Write-Host "Captured at: $($Snapshot.LastChecked.ToString('yyyy-MM-dd HH:mm:ss'))"
-
-    Write-Host "`n[States]" -ForegroundColor DarkGray
-    $Diagnosis.ActiveStates | ForEach-Object {
-        $color = $stateColor[$_] ?? 'White'
-        Write-Host "  $_" -ForegroundColor $color
-    }
-
-    Write-Host "`n[Evidence]" -ForegroundColor DarkGray
-    $Diagnosis.Evidence | ForEach-Object {
-        Write-Host "  $_" -ForegroundColor DarkYellow
+    # Evidence
+    Write-Information "`n[Evidence]" -InformationAction Continue
+    foreach ($e in $Diagnosis.Evidence) {
+        Write-Information "  $e" -InformationAction Continue
     }
 }
 
@@ -339,15 +361,15 @@ function Write-AssociationReport {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][ValidateNotNull()]
-        [AssociationSnapshot]$Snapshot,
+        [AssociationSnapshot] $Snapshot,
 
         [Parameter(Mandatory)][ValidateNotNull()]
-        [AssociationDiagnosis]$Diagnosis,
+        [AssociationDiagnosis] $Diagnosis,
 
         [Parameter()][ValidateSet("Literal", "Explain", "Summary", "None")]
-        [string]$Mode = "Summary",
+        [string] $Mode = "Summary",
 
-        [hashtable]$ColorScheme = @{
+        [hashtable] $ColorScheme = @{
             Success   = 'Green'
             Warning   = 'Red'
             Detail    = 'Yellow'
@@ -356,58 +378,57 @@ function Write-AssociationReport {
         }
     )
 
-    # Null safety check
     if (-not $Snapshot -or -not $Diagnosis) {
         throw "Invalid input: Snapshot and Diagnosis must be provided"
     }
 
-    # State lookup optimization
+    # Build a lookup for quick state checks
     $stateTable = @{}
-    $Diagnosis.ActiveStates | ForEach-Object { $stateTable[$_] = $true }
+    foreach ($s in $Diagnosis.ActiveStates) { $stateTable[$s] = $true }
 
     switch ($Mode) {
-        "None" { return }
+        'None' { return }
 
-        "Literal" {
+        'Literal' {
             Show-AssociationReport -Snapshot $Snapshot -Diagnosis $Diagnosis
         }
 
-        "Explain" {
-            Write-Host "`n[EXPLAINED VIEW: $($Snapshot.Extension.ToUpper())]" -ForegroundColor $ColorScheme.Header
-            Write-Host ("Timestamp: {0}" -f $Snapshot.LastChecked.ToString('yyyy-MM-dd HH:mm')) -ForegroundColor $ColorScheme.Timestamp
+        'Explain' {
+            Write-Information "`n[EXPLAINED VIEW: $($Snapshot.Extension.ToUpper())]" -InformationAction Continue
+            Write-Information ("Timestamp: {0}" -f $Snapshot.LastChecked.ToString('yyyy-MM-dd HH:mm')) -InformationAction Continue
 
-            # Status block
-            Write-Host "`nCORE STATUS:" -ForegroundColor $ColorScheme.Header
+            Write-Information "`nCORE STATUS:" -InformationAction Continue
             if ($Diagnosis.ActiveStates.Count -eq 0) {
-                Write-Host "[+] Configuration Valid" -ForegroundColor $ColorScheme.Success
+                Write-Information "[+] Configuration Valid" -InformationAction Continue
             }
             else {
-                Write-Host "[!] Configuration Issues:" -ForegroundColor $ColorScheme.Warning
-                $Diagnosis.ActiveStates | ForEach-Object {
-                    Write-Host ("  - {0}" -f $_) -ForegroundColor $ColorScheme.Detail
+                Write-Warning "[!] Configuration Issues:" 
+                foreach ($s in $Diagnosis.ActiveStates) {
+                    Write-Information ("  - {0}" -f $s) -InformationAction Continue
                 }
             }
 
-            # Registry details
-            Write-Host "`nREGISTRY ANALYSIS:" -ForegroundColor $ColorScheme.Header
-            Write-Host ("User Choice:    {0}" -f ($Snapshot.RegistryValues.UserChoice?.ProgId ?? '<not set>'))
-            Write-Host ("System Default: {0}" -f ($Snapshot.RegistryValues.SystemDefault ?? '<undefined>'))
-            Write-Host ("Valid Handlers: {0}" -f $Snapshot.HandlerPaths.Count)
-            Write-Host ("MRU Integrity:  {0}" -f $(if ($stateTable[[AssociationState]::CorruptMRUOrder]) { 'Compromised' } else { 'Intact' }))
+            Write-Information "`nREGISTRY ANALYSIS:" -InformationAction Continue
+            Write-Information ("User Choice:    {0}" -f ($Snapshot.RegistryValues.UserChoice?.ProgId ?? '<not set>')) -InformationAction Continue
+            Write-Information ("System Default: {0}" -f ($Snapshot.RegistryValues.SystemDefault ?? '<undefined>')) -InformationAction Continue
+            Write-Information ("Valid Handlers: {0}" -f $Snapshot.HandlerPaths.Count) -InformationAction Continue
+            $mruStatus = if ($stateTable[[AssociationState]::CorruptMRUOrder]) { 'Compromised' } else { 'Intact' }
+            Write-Information ("MRU Integrity:  {0}" -f $mruStatus) -InformationAction Continue
         }
 
-        "Summary" {
+        'Summary' {
             $status = if ($Diagnosis.ActiveStates.Count -eq 0) {
                 "[+]"
-            }
-            else {
+            } else {
                 "[!] {0} issue(s)" -f $Diagnosis.ActiveStates.Count
             }
-            Write-Host ("{0}: {1}" -f $Snapshot.Extension.PadRight(8), $status)
+            Write-Information ("{0}: {1}" -f $Snapshot.Extension.PadRight(8), $status) -InformationAction Continue
         }
     }
 }
+
 #endregion
+
 
 
 #endregion
