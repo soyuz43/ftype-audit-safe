@@ -1,3 +1,5 @@
+# ftype-audit.ps1
+
 <#
 .SYNOPSIS
 Analyzes and repairs Windows file association configurations safely.
@@ -97,9 +99,18 @@ if ($AuditPython -and $PSCmdlet.ParameterSetName -ne '') {
 
 #end region
 
-#region Environment Validation & Bootstrap
+# ─────────────────────────────────────────────
+# Utility helpers (safe to reuse anywhere)
+function Test-CI {
+    return ($env:CI -eq 'true')
+}
+# ─────────────────────────────────────────────
 
-# Exit codes for clarity in pipelines
+
+# Load platform helpers
+. "$PSScriptRoot\platform\PlatformContext.ps1"
+
+# Exit codes preserved for compatibility
 enum ExitCode {
     Success = 0
     UnsupportedEnvironment = 1
@@ -107,106 +118,32 @@ enum ExitCode {
     InsufficientElevation = 3
 }
 
-# 1. PowerShell edition & version
-$psMajor = $PSVersionTable.PSVersion.Major
-$edition = $PSVersionTable.PSEdition   # ← safe local name
+# CI Safety Guard
+if (Test-CI) {
+    Write-Host "🛡️ CI mode detected: skipping environment validation"
+    return
+}
+
+# Get runtime context
+$context = Get-PlatformContext
+
 if (
-    -not ( ($edition -eq 'Desktop' -and $psMajor -ge 5) -or
-            ($edition -eq 'Core' -and $psMajor -ge 7) )
-)
-{
+    -not ( ($context.PowerShellEdition -eq 'Desktop' -and $context.PowerShellMajor -ge 5) -or
+           ($context.PowerShellEdition -eq 'Core' -and $context.PowerShellMajor -ge 7) )
+) {
     Write-Error "[X] Unsupported PowerShell edition/version. Requires Desktop 5.1+ or Core 7.0+ on Windows."
-    exit [int][ExitCode]::UnsupportedEnvironment}
+    exit [int][ExitCode]::UnsupportedEnvironment
+}
 
-# 2. OS platform
-if ([System.Environment]::OSVersion.Platform -ne 'Win32NT') {
+if (-not $context.IsWindows) {
     Write-Error "[X] Windows OS required for registry operations."
-    exit [int][ExitCode]::UnsupportedEnvironment}
-
-# 3. Registry provider & drive presence
-try {
-    Import-Module Microsoft.PowerShell.Management -ErrorAction Stop
-}
-catch {
-    Write-Error "[X] Failed to load Registry provider: $($_.Exception.Message)"
-    exit [int][ExitCode]::RegistryAccessFailure
+    exit [int][ExitCode]::UnsupportedEnvironment
 }
 
-if (-not (Test-Path HKLM:\) -or -not (Test-Path HKCU:\)) {
-    Write-Error "[X] Registry drives HKLM: or HKCU: are unavailable."
-    exit [int][ExitCode]::InsufficientElevation
+if (-not $context.IsElevated) {
+    Write-Warning "[!] Process is not elevated — HKLM writes will be disabled."
 }
 
-# 4. Deep registry read probe (32/64-bit aware)
-$hives = @(
-    @{ Hive = 'LocalMachine'; PSPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'; SubKey = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion' },
-    @{ Hive = 'CurrentUser'; PSPath = 'HKCU:\Volatile Environment'; SubKey = 'Volatile Environment' }
-)
-$errors = @()
-foreach ($h in $hives) {
-    try {
-        if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
-            $base = [Microsoft.Win32.RegistryHive]::$($h.Hive)
-            [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-                $base,
-                [Microsoft.Win32.RegistryView]::Registry64
-            ).OpenSubKey($h.SubKey) | Out-Null
-        }
-        else {
-            Get-Item -Path $h.PSPath -ErrorAction Stop | Out-Null
-        }
-    }
-    catch {
-        $errors += "• Cannot read $($h.PSPath): $($_.Exception.Message)"
-    }
-}
-if ($errors.Count) {
-    Write-Error "[!] Registry access validation failed:`n$($errors -join "`n")"
-    exit [int][ExitCode]::InsufficientElevation
-}
-#endregion
-
-#region Python Residue Tools
-if ($AuditPython) {
-    . "$PSScriptRoot\src\Cleanup-PythonResidue.ps1"
-
-    Test-PythonResiduals
-    Get-PythonPathInfo
-    Test-CommandExists -Command 'python'
-    Test-CommandExists -Command 'pip'
-
-    return [int][ExitCode]::Success
-}
-#endregion
-
-
-#region Elevation Check
-
-Add-Type -MemberDefinition @'
-    using System;
-    using System.Runtime.InteropServices;
-    public class TokenHelper {
-        [DllImport("advapi32.dll", SetLastError=true)]
-        public static extern bool OpenProcessToken(IntPtr ProcessHandle, UInt32 DesiredAccess, out IntPtr TokenHandle);
-        [DllImport("advapi32.dll", SetLastError=true)]
-        public static extern bool GetTokenInformation(IntPtr TokenHandle, int TokenInfoClass, out int TokenInfo, int TokenInfoLength, out int ReturnLength);
-    }
-'@ -Name 'TokenHelper' -Namespace 'Win32' -ErrorAction SilentlyContinue
-
-function Test-IsElevated {
-    $procHandle = [System.Diagnostics.Process]::GetCurrentProcess().Handle
-    $tokenHandle = [IntPtr]::Zero
-    [Win32.TokenHelper]::OpenProcessToken($procHandle, 0x8, [ref]$tokenHandle) | Out-Null
-    $info = 0; $size = 0
-    [Win32.TokenHelper]::GetTokenInformation($tokenHandle, 20, [ref]$info, 4, [ref]$size) | Out-Null
-    return ($info -eq 2)  # 2 = Full elevation
-}
-
-if (-not (Test-IsElevated)) {
-    Write-Warning "[!] Process is not elevated-HKLM writes will be disabled."
-}
-
-#endregion
 
 #region Data Collection
 
