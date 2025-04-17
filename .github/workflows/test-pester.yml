@@ -1,0 +1,28 @@
+# .github/workflows/test-pester.yml
+name: Pester Tests
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/test-pester.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+
+jobs:
+  test:
+    name: Run Pester Tests
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          Install-Module Pester -Force -Scope CurrentUser -SkipPublisherCheck
+          Invoke-Pester -Path ./tests -Output Detailed -PassThru
