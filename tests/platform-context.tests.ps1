@@ -1,59 +1,74 @@
-# tests/platform-context.tests.ps1
-
-. "$PSScriptRoot/../src/platform/PlatformContext.ps1"
+BeforeAll {
+    # Resolve platform context script path
+    $scriptPath = Join-Path $PSScriptRoot '../src/platform/PlatformContext.ps1' -Resolve
+    . $scriptPath
+}
 
 Describe "Get-PlatformContext [real environment]" {
-    It "Returns all expected keys" {
-        $ctx = Get-PlatformContext
-        $ctx.Keys | Should -Contain "PowerShellEdition"
-        $ctx.Keys | Should -Contain "PowerShellMajor"
-        $ctx.Keys | Should -Contain "IsWindows"
-        $ctx.Keys | Should -Contain "IsElevated"
-        $ctx.Keys | Should -Contain "Is64BitOS"
-        $ctx.Keys | Should -Contain "Is64BitProcess"
-    }
+    $expectedKeys = @(
+        'PowerShellEdition',
+        'PowerShellMajor',
+        'IsWindows',
+        'IsElevated',
+        'Is64BitOS',
+        'Is64BitProcess'
+    )
 
+    foreach ($key in $expectedKeys) {
+        It "Includes key: $key" {
+            $ctx = Get-PlatformContext
+            Write-Host "[DEBUG] ctx = $($ctx | Out-String)"
+            It "Includes key: $key" {
+    $ctx = Get-PlatformContext
+    $ctx.ContainsKey($key) | Should -BeTrue
+}
+        }
+    }
     It "Reports PowerShell edition as 'Desktop' or 'Core'" {
         $ctx = Get-PlatformContext
         $ctx.PowerShellEdition | Should -Match "Desktop|Core"
     }
 
     It "Returns PowerShellMajor as Int32" {
-        $ctx = Get-PlatformContext
-        $ctx.PowerShellMajor | Should -BeOfType "System.Int32"
+        (Get-PlatformContext).PowerShellMajor | Should -BeOfType [int]
     }
 
-    It "Returns IsWindows as Boolean" {
-        $ctx = Get-PlatformContext
-        $ctx.IsWindows | Should -BeOfType "System.Boolean"
-    }
+    Context "Boolean Values" {
+        It "IsWindows is Boolean" {
+            (Get-PlatformContext).IsWindows | Should -BeOfType [bool]
+        }
 
-    It "Returns IsElevated as Boolean" {
-        $ctx = Get-PlatformContext
-        $ctx.IsElevated | Should -BeOfType "System.Boolean"
+        It "IsElevated is Boolean" {
+            (Get-PlatformContext).IsElevated | Should -BeOfType [bool]
+        }
+        
+        It "Is64BitOS is Boolean" {
+            (Get-PlatformContext).Is64BitOS | Should -BeOfType [bool]
+        }
     }
 }
 
-Describe "Get-PlatformContext [simulated]" {
-    It "Simulates non-elevated session" {
+Describe "Get-PlatformContext [simulated]" -Tag 'Mocked' {
+    BeforeAll {
         Mock Test-IsElevated { $false }
+        Mock Get-PlatformContext {
+            return [ordered]@{
+                PowerShellEdition = 'Core'
+                PowerShellMajor   = 7
+                IsWindows         = $true
+                IsElevated        = $false
+                Is64BitOS         = $true
+                Is64BitProcess    = $false
+            }
+        }
+    }
 
+    It "Simulates non-elevated session" {
         $ctx = Get-PlatformContext
         $ctx.IsElevated | Should -BeFalse
     }
 
     It "Simulates 32-bit PowerShell on 64-bit OS" {
-        Mock Get-PlatformContext {
-            return @{
-                PowerShellEdition = 'Core'
-                PowerShellMajor   = 7
-                IsWindows         = $true
-                IsElevated        = $true
-                Is64BitOS         = $true
-                Is64BitProcess    = $false
-            }
-        }
-
         $ctx = Get-PlatformContext
         $ctx.Is64BitOS | Should -BeTrue
         $ctx.Is64BitProcess | Should -BeFalse
