@@ -1,7 +1,15 @@
 BeforeAll {
     $scriptPath = Join-Path $PSScriptRoot '../src/platform/PlatformContext.ps1' -Resolve
+
+    Write-Host "[DEBUG] Sourcing platform context from: $scriptPath"
+
+    if (-not (Test-Path $scriptPath)) {
+        throw "Cannot find PlatformContext.ps1 at: $scriptPath"
+    }
+
     . $scriptPath
 }
+
 
 Describe "Get-PlatformContext [real environment]" {
     $ctx = Get-PlatformContext  # Capture once to avoid repeated calls
