@@ -1,15 +1,27 @@
-BeforeAll {
-    Write-Host "DEBUG: PSScriptRoot = $PSScriptRoot"
-    $scriptPath = Join-Path $PSScriptRoot '../src/platform/PlatformContext.ps1'
-    Write-Host "DEBUG: Attempting to dot-source from $scriptPath"
+Write-Host "DEBUG: Test file loaded"
+Write-Host "DEBUG: PSScriptRoot = $PSScriptRoot"
+Write-Host "DEBUG: Current location = $(Get-Location)"
 
-    if (-not (Test-Path $scriptPath)) {
-        Get-ChildItem -Recurse -Path $PSScriptRoot | Write-Host
-        throw "Missing PlatformContext.ps1 at $scriptPath"
-    }
+$probePath = Join-Path $PSScriptRoot '../src/platform/PlatformContext.ps1'
+Write-Host "DEBUG: Probing for $probePath"
 
-    . $scriptPath
+if (-not (Test-Path $probePath)) {
+    Write-Host "DEBUG: File not found"
+    Get-ChildItem -Recurse $PSScriptRoot | ForEach-Object { Write-Host "  -> $_" }
+    throw "PlatformContext.ps1 not found"
 }
+
+. $probePath
+
+Write-Host "DEBUG: Dot-sourced $probePath"
+
+if (Get-Command Get-PlatformContext -ErrorAction SilentlyContinue) {
+    Write-Host "DEBUG: Get-PlatformContext is now available"
+} else {
+    throw "Get-PlatformContext is still not available"
+}
+
+
 
 
 Describe "Get-PlatformContext [real environment]" {
