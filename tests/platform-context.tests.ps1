@@ -1,7 +1,8 @@
 BeforeAll {
-    $scriptPath = Join-Path $PSScriptRoot '../src/platform/PlatformContext.ps1' -Resolve
+    $scriptPath = Join-Path $PSScriptRoot '../src/platform/PlatformContext.ps1'
 
-    Write-Host "[DEBUG] Sourcing platform context from: $scriptPath"
+    Write-Host "[DEBUG] PSScriptRoot: $PSScriptRoot"
+    Write-Host "[DEBUG] Resolved script path: $scriptPath"
 
     if (-not (Test-Path $scriptPath)) {
         throw "Cannot find PlatformContext.ps1 at: $scriptPath"
@@ -10,9 +11,8 @@ BeforeAll {
     . $scriptPath
 }
 
-
 Describe "Get-PlatformContext [real environment]" {
-    $ctx = Get-PlatformContext  # Capture once to avoid repeated calls
+    $ctx = Get-PlatformContext
     $expectedKeys = @(
         'PowerShellEdition',
         'PowerShellMajor',
@@ -24,7 +24,6 @@ Describe "Get-PlatformContext [real environment]" {
 
     foreach ($key in $expectedKeys) {
         It "Includes key: $key" {
-            # Check if the property exists on the PSCustomObject
             $ctx.PSObject.Properties.Name | Should -Contain $key
         }
     }
@@ -45,7 +44,7 @@ Describe "Get-PlatformContext [real environment]" {
         It "IsElevated is Boolean" {
             $ctx.IsElevated | Should -BeOfType [bool]
         }
-        
+
         It "Is64BitOS is Boolean" {
             $ctx.Is64BitOS | Should -BeOfType [bool]
         }
