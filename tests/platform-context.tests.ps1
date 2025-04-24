@@ -1,15 +1,16 @@
 BeforeAll {
+    Write-Host "DEBUG: PSScriptRoot = $PSScriptRoot"
     $scriptPath = Join-Path $PSScriptRoot '../src/platform/PlatformContext.ps1'
-
-    Write-Host "[DEBUG] PSScriptRoot: $PSScriptRoot"
-    Write-Host "[DEBUG] Resolved script path: $scriptPath"
+    Write-Host "DEBUG: Attempting to dot-source from $scriptPath"
 
     if (-not (Test-Path $scriptPath)) {
-        throw "Cannot find PlatformContext.ps1 at: $scriptPath"
+        Get-ChildItem -Recurse -Path $PSScriptRoot | Write-Host
+        throw "Missing PlatformContext.ps1 at $scriptPath"
     }
 
     . $scriptPath
 }
+
 
 Describe "Get-PlatformContext [real environment]" {
     $ctx = Get-PlatformContext
