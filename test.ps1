@@ -1,5 +1,4 @@
 $requiredVersion = [Version]"5.0"
-
 $active = (Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1)
 
 if ($active.Version -lt $requiredVersion) {
@@ -8,4 +7,7 @@ if ($active.Version -lt $requiredVersion) {
 
 Import-Module Pester -RequiredVersion $active.Version
 
-Invoke-Pester -Configuration (Import-PowerShellDataFile '.config/PesterConfiguration.psd1')
+$config = New-PesterConfiguration
+$config.Run.Path = 'tests'
+$config.Output.Verbosity = 'Detailed'
+Invoke-Pester -Configuration $config
