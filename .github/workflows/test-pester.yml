@@ -22,7 +22,7 @@ jobs:
 
       - name: Run tests
         shell: pwsh
-        run: ./test.ps1
+        run: ./tests/test.ps1
 
       - name: Upload test results
         if: always()
