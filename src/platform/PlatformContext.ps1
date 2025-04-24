@@ -1,14 +1,6 @@
 # src/platform/PlatformContext.ps1
 # Provides cross-platform/environment metadata as a typed object
-BeforeAll {
-    $scriptPath = Join-Path $PSScriptRoot '../src/platform/PlatformContext.ps1'
-    if (Test-Path $scriptPath) {
-        Write-Host "[DEBUG] Sourcing: $scriptPath"
-        . $scriptPath
-    } else {
-        throw "Cannot find PlatformContext.ps1 at $scriptPath"
-    }
-}
+
 #region Elevation Detection
 if (-not ([System.Management.Automation.PSTypeName]'Win32.TokenHelper').Type) {
     Add-Type -TypeDefinition @'
