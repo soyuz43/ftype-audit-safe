@@ -1,7 +1,7 @@
 # 📘 FtypeAudit Documentation
 
 **Secure File Association Management for Windows**  
-*Version 1.0.0 | MIT License*
+*Version 1.0.0 | MIT License* |
 https://github.com/soyuz43/ftype-audit-safe
 ---
 
