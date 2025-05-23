@@ -40,16 +40,20 @@ Explanation of Layers
 .\ftype-audit.ps1 .md -Explain
 ```
 #### Parameters
-Parameter	Description
--Path	File or extension to analyze (e.g., .txt, C:\file.pdf)
--DryRun	Preview changes without writing to registry
--Backup	Create .reg backup before making any changes
--BackupPath	Custom path for registry backup file
--Force	Skip confirmation prompt (used with actual registry changes)
--Explain	Display analysis of file association conflicts
--Literal	Output raw technical details only
--Help	Show usage instructions
-🧾 Output
+
+| Parameter   | Description                                                   |
+|-------------|---------------------------------------------------------------|
+| `-Path`     | File or extension to analyze (e.g., `.txt`, `C:\file.pdf`)    |
+| `-DryRun`   | Preview changes without writing to registry                   |
+| `-Backup`   | Create `.reg` backup before making any changes                |
+| `-BackupPath` | Custom path for registry backup file                        |
+| `-Force`    | Skip confirmation prompt (used with actual registry changes)  |
+| `-Explain`  | Display analysis of file association conflicts                |
+| `-Literal`  | Output raw technical details only                             |
+| `-Help`     | Show usage instructions                                       |
+
+🧾 **Output**
+
 
 Example technical report:
 ```plaintext
