@@ -1,2 +1,13 @@
 # Ignore local certificates
 /Certificates/
+# Test results and coverage reports
+test-results.xml
+coverage.xml
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Other common test artifacts
+*.tmp
+*.log
