@@ -22,6 +22,7 @@
 
     # Functions to export from this module
     FunctionsToExport = @(
+        'Get-PlatformContext',
         'Get-SafeSemioticMap',
         'Invoke-SafeClean',
         'Show-TechnicalReport'
