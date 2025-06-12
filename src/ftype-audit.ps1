@@ -97,7 +97,6 @@ if ($AuditPython -and $PSCmdlet.ParameterSetName -ne '') {
     exit 1
 }
 
-#end region
 
 # ─────────────────────────────────────────────
 # Utility helpers (safe to reuse anywhere)
