@@ -27,11 +27,11 @@ function Backup-RegistryState {
 
     try {
         Start-Process reg -ArgumentList "export", $keyPath, $quotedBackupPath, "/y" -Wait -NoNewWindow -ErrorAction Stop
-        Write-Host "✅ Backup created: $BackupPath" -ForegroundColor Green
+        Write-Host "[Y] Backup created: $BackupPath" -ForegroundColor Green
         return $true
     }
     catch {
-        Write-Host "❌ Backup failed: $_" -ForegroundColor Red
+        Write-Host "[X] Backup failed: $_" -ForegroundColor Red
         return $false
     }
 }
