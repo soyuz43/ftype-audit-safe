@@ -101,8 +101,12 @@ if ($AuditPython -and $PSCmdlet.ParameterSetName -ne '') {
 # ─────────────────────────────────────────────
 # Utility helpers (safe to reuse anywhere)
 # Load helpers
-. "$PSScriptRoot\core\RegistryHelpers.ps1"
 . "$PSScriptRoot\platform\PlatformContext.ps1"
+. "$PSScriptRoot\core\Snapshot.ps1"
+. "$PSScriptRoot\core\Diagnosis.ps1"
+. "$PSScriptRoot\core\Reporter.ps1"
+. "$PSScriptRoot\core\Repair.ps1"
+. "$PSScriptRoot\core\RegistryHelpers.ps1"
 
 # Skip validation in CI
 if (-not (Test-CI)) {

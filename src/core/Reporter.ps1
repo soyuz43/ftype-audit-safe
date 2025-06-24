@@ -99,5 +99,3 @@ function Write-AssociationReport {
         }
     }
 }
-
-#endregion
