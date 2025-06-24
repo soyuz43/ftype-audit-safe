@@ -91,7 +91,7 @@ To preview repairs without modifying the registry, use `-DryRun`:
 ```
 > 🛑 Use `-Clean` to apply changes. Elevation required.
 
-Note: `-Dry-Run` flags MRU entries as they exist in the registry, whereas `-Explain` shows MRU integrity after resolving only valid handlers—so a corrupt raw MRU can appear fixed once invalid handlers are filtered out._
+Note: `-Dry-Run` flags MRU entries as they exist in the registry, whereas `-Explain` shows MRU integrity after resolving only valid handlers—so a corrupt raw MRU can appear fixed once invalid handlers are filtered out.
 
 
 
