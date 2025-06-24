@@ -52,23 +52,50 @@ Explanation of Layers
 | `-Literal`  | Output raw technical details only                             |
 | `-Help`     | Show usage instructions                                       |
 
-🧾 **Output**
+#### 🧾 **Example Output**
 
+When analyzing a file association using the `-Explain` flag, you'll see a human-readable summary:
 
-Example technical report:
 ```plaintext
+[EXPLAINED VIEW: .TXT]
+Timestamp: 2025-06-24 12:45
 
+CORE STATUS:
+[+] Configuration Valid
 
-[Technical Analysis: .txt]
-----------------------------------------
-User Choice ProgID: txtfile
-System Default:     txtfile
-MRU List Validity:  Valid
+REGISTRY ANALYSIS:
+User Choice:    txtfile
+System Default: txtfile
+Valid Handlers: 1
+MRU Integrity:  Intact
+````
 
-Handler Inventory:
-  a: NOTEPAD.EXE [OK]
-  b: Code.exe     [MISSING]
+For raw technical data, use the `-Literal` flag:
+
+```plaintext
+Association Health Report: .txt
+Captured at: 2025-06-24 12:45:21
+
+[Evidence]
+  @{State=BrokenHandlerPath; Message=Handler resolution failed: Code.exe}
+  @{State=CorruptMRUOrder; Message=MRU references invalid handlers: a,e,b}
 ```
+
+To preview repairs without modifying the registry, use `-DryRun`:
+
+```plaintext
+.txt    : [+]
+[>] Simulated repair operations:
+    would fix: @{State=BrokenHandlerPath; Message=Handler resolution failed: Code.exe}
+    would fix: @{State=CorruptMRUOrder; Message=MRU references invalid handlers: a,e,b}
+```
+> 🛑 Use `-Clean` to apply changes. Elevation required.
+
+Note: `-Dry-Run` flags MRU entries as they exist in the registry, whereas `-Explain` shows MRU integrity after resolving only valid handlers—so a corrupt raw MRU can appear fixed once invalid handlers are filtered out._
+
+
+
+
 
 #### 🔐 Security & Signing
 

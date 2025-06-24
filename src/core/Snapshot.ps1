@@ -3,6 +3,9 @@
 class AssociationSnapshot {
     [string]$Extension
 
+    # Indicates whether any registry data was found
+    [bool]$HasData = $false
+
     # Holds the raw registry values we capture
     [object]$RegistryValues = [PSCustomObject]@{
         UserChoice    = $null
@@ -11,6 +14,7 @@ class AssociationSnapshot {
     }
 
     # Mapping from the 'a'..'z' keys to resolved handler paths
+    # Populated externally by the handler-resolution logic
     [System.Collections.Generic.Dictionary[string,string]]$HandlerPaths
 
     # When this snapshot was taken
@@ -35,34 +39,42 @@ function Get-AssociationSnapshot {
 
     # Build a fresh snapshot object
     $snapshot = [AssociationSnapshot]::new()
+
+    # Normalize extension to lowercase to match registry key format
     $snapshot.Extension = $Extension.ToLower()
 
-    # Capture raw registry state
+    # Capture user-level choice if present
     try {
-        $userChoicePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Extension\UserChoice"
+        $userChoicePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$($snapshot.Extension)\UserChoice"
         if (Test-Path $userChoicePath) {
             $snapshot.RegistryValues.UserChoice = Get-ItemProperty $userChoicePath
+            $snapshot.HasData = $true
         }
     }
     catch {
-        # Log access issues if you wire up a logger
+        # Access issues ignored; consider logging if needed
     }
 
+    # Capture system default ProgID; use Get-Item/GetValue to avoid brittle '(default)' property
     try {
-        $snapshot.RegistryValues.SystemDefault = (Get-ItemProperty "HKCR:\$Extension" -ErrorAction Stop).'(default)'
+        $key = Get-Item "HKCR:\$($snapshot.Extension)" -ErrorAction Stop
+        $snapshot.RegistryValues.SystemDefault = $key.GetValue('')
+        $snapshot.HasData = $true
     }
     catch {
-        # Key may not exist
+        # Key may not exist or be inaccessible
     }
 
+    # Capture the "Open With" list entries at user level
     try {
-        $openWithPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Extension\OpenWithList"
+        $openWithPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$($snapshot.Extension)\OpenWithList"
         if (Test-Path $openWithPath) {
             $snapshot.RegistryValues.OpenWithList = Get-ItemProperty $openWithPath
+            $snapshot.HasData = $true
         }
     }
     catch {
-        # Log access issues if desired
+        # Access issues ignored; consider logging if needed
     }
 
     return $snapshot
