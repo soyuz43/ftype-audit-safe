@@ -1,4 +1,28 @@
 # src\core\Reporter.ps1
+
+#  Helper: Resolve a ProgID like 'AppX...' to a friendly app name (e.g., "Notepad")
+function Resolve-ProgIdToAppName {
+    param ([string]$ProgId)
+
+    if (-not $ProgId) {
+        return '<not set>'
+    }
+
+    try {
+        # Try to get the friendly name from the registry
+        $regPath = "HKEY_CLASSES_ROOT\$ProgId"
+        $friendlyName = (Get-ItemProperty -Path "Registry::$regPath" -Name "(default)" -ErrorAction SilentlyContinue).'(default)'
+        
+        if ($friendlyName) {
+            return "$ProgId ($friendlyName)"
+        } else {
+            return "$ProgId (No description)"
+        }
+    } catch {
+        return "$ProgId (Unresolvable)"
+    }
+}
+
 function Show-AssociationReport {
     [CmdletBinding()]
     param(
@@ -15,7 +39,6 @@ function Show-AssociationReport {
     # Header
     Write-Information "`nAssociation Health Report: $($Snapshot.Extension)" -InformationAction Continue
     Write-Information ("Captured at: {0:yyyy-MM-dd HH:mm:ss}" -f $Snapshot.LastChecked) -InformationAction Continue
-
 
     # States
     Write-Information "`n[States]" -InformationAction Continue
@@ -82,7 +105,9 @@ function Write-AssociationReport {
             }
 
             Write-Information "`nREGISTRY ANALYSIS:" -InformationAction Continue
-            Write-Information ("User Choice:    {0}" -f ($Snapshot.RegistryValues.UserChoice?.ProgId ?? '<not set>')) -InformationAction Continue
+
+            $resolved = Resolve-ProgIdToAppName $Snapshot.RegistryValues.UserChoice?.ProgId
+            Write-Information ("User Choice:    {0}" -f ($resolved ?? '<not set>')) -InformationAction Continue
             Write-Information ("System Default: {0}" -f ($Snapshot.RegistryValues.SystemDefault ?? '<undefined>')) -InformationAction Continue
             Write-Information ("Valid Handlers: {0}" -f $Snapshot.HandlerPaths.Count) -InformationAction Continue
             $mruStatus = if ($stateTable[[AssociationState]::CorruptMRUOrder]) { 'Compromised' } else { 'Intact' }
@@ -96,6 +121,12 @@ function Write-AssociationReport {
                 "[!] {0} issue(s)" -f $Diagnosis.ActiveStates.Count
             }
             Write-Information ("{0}: {1}" -f $Snapshot.Extension.PadRight(8), $status) -InformationAction Continue
+
+            # Legend for summary symbols
+            Write-Information "" -InformationAction Continue
+            Write-Information 'Legend:' -InformationAction Continue
+            Write-Information '  [+]  All association checks passed successfully.' -InformationAction Continue
+            Write-Information '  [!]  One or more issues detected — run with -Explain for details.' -InformationAction Continue
         }
     }
 }
