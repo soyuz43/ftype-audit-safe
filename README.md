@@ -37,7 +37,7 @@ Technical Report
 ```
 Explanation of Layers
 ```
-.\ftype-audit.ps1 .md -Explain
+.\ftype-audit.ps1 .html -Explain
 ```
 #### Parameters
 
