@@ -180,7 +180,7 @@ function Remove-PythonRegistryKeys {
         "HKLM:\SOFTWARE\WOW6432Node\Python",
         "HKCU:\Software\Python"
     )
-    #endregion
+    
 
     #region Elevation Check
 
@@ -199,7 +199,7 @@ function Remove-PythonRegistryKeys {
     if ($requiresElevation) {
         throw "Administrator rights required for system key modification. Run as admin."
     }
-    #endregion
+    
 
 
     #region Target Verification
@@ -209,7 +209,7 @@ function Remove-PythonRegistryKeys {
         Write-Verbose "No Python registry keys found"
         return
     }
-    #endregion
+    
 
     #region Backup Implementation
     try {
@@ -232,7 +232,7 @@ function Remove-PythonRegistryKeys {
     catch {
         throw "Backup failed: $($_.Exception.Message)"
     }
-    #endregion
+    
 
     #region Removal Protocol
     foreach ($key in $existingKeys) {
@@ -253,7 +253,7 @@ function Remove-PythonRegistryKeys {
             }
         }
     }
-    #endregion
+    
 }
 
 <#
@@ -331,4 +331,4 @@ function Clear-PythonPathEntries {
 }
 
 
-#endregion
+
