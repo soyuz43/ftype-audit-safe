@@ -14,6 +14,7 @@ FtypeAudit is a hardened, security-aware PowerShell utility for **auditing**, **
 
 ---
 
+
 ## 🛠 Usage
 
 ### Basic Audit
@@ -29,7 +30,7 @@ Dry Run (No Changes)
 ```
 Backup Before Repair
 ```
-.\ftype-audit.ps1 .docx -Backup -Force
+.\ftype-audit.ps1 .docx -Backup -Clean
 ```
 Technical Report
 ```
@@ -41,16 +42,19 @@ Explanation of Layers
 ```
 #### Parameters
 
-| Parameter   | Description                                                   |
-|-------------|---------------------------------------------------------------|
-| `-Path`     | File or extension to analyze (e.g., `.txt`, `C:\file.pdf`)    |
-| `-DryRun`   | Preview changes without writing to registry                   |
-| `-Backup`   | Create `.reg` backup before making any changes                |
-| `-BackupPath` | Custom path for registry backup file                        |
-| `-Force`    | Skip confirmation prompt (used with actual registry changes)  |
-| `-Explain`  | Display analysis of file association conflicts                |
-| `-Literal`  | Output raw technical details only                             |
-| `-Help`     | Show usage instructions                                       |
+| Parameter           | Description                                                   |
+|---------------------|---------------------------------------------------------------|
+| `-Path`             | File or extension to analyze (e.g., `.txt`, `C:\file.pdf`)    |
+| `-DryRun`           | Preview changes without writing to registry                   |
+| `-Backup`           | Create `.reg` backup before making any changes                |
+| `-BackupPath`       | Custom path for registry backup file                        |
+| `-Clean`            | Perform safe cleanup of file association entries              |
+| `-SkipConfirmation` | Skip interactive confirmation prompts (affects -Clean, -DryRun)|
+| `-Explain`          | Display analysis of file association conflicts                |
+| `-Literal`          | Output raw technical details only                             |
+| `-IsExtension`      | Treat input Path explicitly as an extension (bypass file-exists check) |
+| `-AuditPython`      | Run Python residue audit and exit                             |
+| `-Help`             | Show detailed help screen                                       |
 
 #### 🧾 **Example Output**
 
@@ -91,7 +95,7 @@ To preview repairs without modifying the registry, use `-DryRun`:
 ```
 > 🛑 Use `-Clean` to apply changes. Elevation required.
 
-Note: `-Dry-Run` flags MRU entries as they exist in the registry, whereas `-Explain` shows MRU integrity after resolving only valid handlers—so a corrupt raw MRU can appear fixed once invalid handlers are filtered out.
+Note: `-DryRun` flags MRU entries as they exist in the registry, whereas `-Explain` shows MRU integrity after resolving only valid handlers—so a corrupt raw MRU can appear fixed once invalid handlers are filtered out.
 
 
 
