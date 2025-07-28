@@ -93,20 +93,7 @@ param(
 )
 # Check if we are running in the dedicated Python Audit mode
 if ($PSCmdlet.ParameterSetName -eq 'PythonAudit') {
-
-    # --- Platform Context Display (Similar to main script flow) ---
-    # Get the platform context (already loaded via . "$PSScriptRoot\platform\PlatformContext.ps1")
-    $script:PlatformContext = Get-PlatformContext # This will output the [DEBUG] lines
-
-    # Explicitly check and warn about elevation for the user's awareness,
-    # even though individual cleanup functions will also check.
-    if (-not $script:PlatformContext.IsElevated) {
-        Write-Warning "[!] Process is not elevated — HKLM writes will be disabled."
-        # Or a more specific message for Python:
-        # Write-Warning "[!] Process is not elevated — System-wide Python cleanup actions will be disabled or skipped."
-    }
-    # --- End Platform Context Display ---
-
+    
     # Source the Python cleanup script
     . "$PSScriptRoot\cleanup\Python.ps1"
 
