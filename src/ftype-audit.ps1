@@ -86,17 +86,41 @@ param(
     [Parameter(ParameterSetName = 'Clean')]
     [switch]$IsExtension,
 
-    # - Python cleanup tools
-    [Parameter(HelpMessage = 'Run Python residue audit and exit')]
+# - Python cleanup tools
+    [Parameter(ParameterSetName = 'PythonAudit', HelpMessage = 'Run Python residue audit and exit')]
     [switch]$AuditPython
 
 )
+# Check if we are running in the dedicated Python Audit mode
+if ($PSCmdlet.ParameterSetName -eq 'PythonAudit') {
 
-if ($AuditPython -and $PSCmdlet.ParameterSetName -ne '') {
-    Write-Error "The -AuditPython flag cannot be used with other operation modes."
-    exit 1
+    # --- Platform Context Display (Similar to main script flow) ---
+    # Get the platform context (already loaded via . "$PSScriptRoot\platform\PlatformContext.ps1")
+    $script:PlatformContext = Get-PlatformContext # This will output the [DEBUG] lines
+
+    # Explicitly check and warn about elevation for the user's awareness,
+    # even though individual cleanup functions will also check.
+    if (-not $script:PlatformContext.IsElevated) {
+        Write-Warning "[!] Process is not elevated — HKLM writes will be disabled."
+        # Or a more specific message for Python:
+        # Write-Warning "[!] Process is not elevated — System-wide Python cleanup actions will be disabled or skipped."
+    }
+    # --- End Platform Context Display ---
+
+    # Source the Python cleanup script
+    . "$PSScriptRoot\cleanup\Python.ps1"
+
+    # Execute Python audit functions
+    # Example calls based on the provided Python.ps1 content:
+    Test-PythonResiduals
+    Get-PythonPathInfo
+    Test-CommandExists -Command "python"
+    Test-CommandExists -Command "pip"
+    # Add other relevant audit functions from Python.ps1 as needed
+
+    # Exit after running the audit
+    exit 0
 }
-
 
 # ─────────────────────────────────────────────
 # Utility helpers (safe to reuse anywhere)
