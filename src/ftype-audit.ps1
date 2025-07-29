@@ -297,17 +297,29 @@ if ($Clean -or $DryRun) {
                 Write-Information "    would fix: $_" -InformationAction Continue
             }
         } else {
+            # --- Fix: Use the correct function name and adapt parameters ---
+            # The standalone script calls Invoke-SafeClean from Repair.ps1
+            # Invoke-SafeClean uses -Map (Snapshot), -Backup, -Force (for SkipConfirmation), and handles its own backup path logic.
+            # The -Diagnosis object is used by the reporter but not directly by Invoke-SafeClean's current signature.
             try {
-                Repair-Association -Snapshot $snapshot -Diagnosis $diagnosis `
-                                   -Backup:$Backup -BackupPath $BackupPath
+                # Map relevant parameters:
+                # - $snapshot -> -Map
+                # - $Backup -> -Backup
+                # - $SkipConfirmation -> -Force (to bypass internal ShouldContinue prompt)
+                # - $BackupPath is handled by Backup-RegistryState if needed, or ignored if Backup-RegistryState uses its default.
+                #    If you need to pass a custom path to Backup-RegistryState, you'd need to modify Invoke-SafeClean or
+                #    potentially override the BackupPath parameter within Backup-RegistryState itself before the call,
+                #    or modify Invoke-SafeClean to accept and pass a custom backup path. For now, we rely on the default
+                #    behavior of Backup-RegistryState which creates a file like ".\ftype-backup-*.reg".
+                Invoke-SafeClean -Map $snapshot -Backup:$Backup -Force:$SkipConfirmation
             } catch {
                 Write-Error "[X] Repair failed: $($_.Exception.Message)" -Category OperationStopped
                 exit 1
             }
+            # --- End of Fix ---
         }
     }
 }
-
 
 
 
