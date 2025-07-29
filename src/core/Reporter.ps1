@@ -12,7 +12,7 @@ function Resolve-ProgIdToAppName {
         # Try to get the friendly name from the registry
         $regPath = "HKEY_CLASSES_ROOT\$ProgId"
         $friendlyName = (Get-ItemProperty -Path "Registry::$regPath" -Name "(default)" -ErrorAction SilentlyContinue).'(default)'
-        
+
         if ($friendlyName) {
             return "$ProgId ($friendlyName)"
         } else {
@@ -33,23 +33,20 @@ function Show-AssociationReport {
         [AssociationDiagnosis]$Diagnosis
     )
 
-    foreach ($state in $Diagnosis.ActiveStates) {
-        Write-Information "  $state" -InformationAction Continue
-    }
     # Header
     Write-Information "`nAssociation Health Report: $($Snapshot.Extension)" -InformationAction Continue
     Write-Information ("Captured at: {0:yyyy-MM-dd HH:mm:ss}" -f $Snapshot.LastChecked) -InformationAction Continue
 
-    # States
-    Write-Information "`n[States]" -InformationAction Continue
-    foreach ($state in $Diagnosis.ActiveStates) {
-        Write-Information "  $state" -InformationAction Continue
-    }
-
-    # Evidence
+    # Evidence (This replaces the old [States] section which used non-existent ActiveStates)
+    # The Evidence contains both the State enum and the descriptive Message
     Write-Information "`n[Evidence]" -InformationAction Continue
-    foreach ($e in $Diagnosis.Evidence) {
-        Write-Information "  $e" -InformationAction Continue
+    if ($Diagnosis.Evidence.Count -eq 0) {
+        Write-Information "  No issues detected." -InformationAction Continue
+    } else {
+        foreach ($evidenceItem in $Diagnosis.Evidence) {
+            # Example output: "  CorruptMRUOrder: MRU references invalid handlers: a,e,b"
+            Write-Information "  $($evidenceItem.State): $($evidenceItem.Message)" -InformationAction Continue
+        }
     }
 }
 
@@ -78,9 +75,18 @@ function Write-AssociationReport {
         throw "Invalid input: Snapshot and Diagnosis must be provided"
     }
 
-    # Build a lookup for quick state checks
+    # Build a lookup for quick state checks based on Evidence
+    # This is used in 'Explain' mode to check for specific states like CorruptMRUOrder
     $stateTable = @{}
-    foreach ($s in $Diagnosis.ActiveStates) { $stateTable[$s] = $true }
+    foreach ($evidenceItem in $Diagnosis.Evidence) {
+        # Use the State enum value as the key for easy lookup
+        $stateTable[$evidenceItem.State] = $true
+        # Alternatively, if you wanted to count occurrences:
+        # if (-not $stateTable.ContainsKey($evidenceItem.State)) {
+        #     $stateTable[$evidenceItem.State] = 0
+        # }
+        # $stateTable[$evidenceItem.State]++
+    }
 
     switch ($Mode) {
         'None' { return }
@@ -94,13 +100,16 @@ function Write-AssociationReport {
             Write-Information ("Timestamp: {0}" -f $Snapshot.LastChecked.ToString('yyyy-MM-dd HH:mm')) -InformationAction Continue
 
             Write-Information "`nCORE STATUS:" -InformationAction Continue
-            if ($Diagnosis.ActiveStates.Count -eq 0) {
+            # Use Evidence.Count instead of ActiveStates.Count
+            if ($Diagnosis.Evidence.Count -eq 0) {
                 Write-Information "[+] Configuration Valid" -InformationAction Continue
             }
             else {
-                Write-Warning "[!] Configuration Issues:" 
-                foreach ($s in $Diagnosis.ActiveStates) {
-                    Write-Information ("  - {0}" -f $s) -InformationAction Continue
+                Write-Warning "[!] Configuration Issues:"
+                # Iterate through Evidence to show issues
+                foreach ($evidenceItem in $Diagnosis.Evidence) {
+                     # Show the descriptive message from Evidence
+                    Write-Information ("  - {0}: {1}" -f $evidenceItem.State, $evidenceItem.Message) -InformationAction Continue
                 }
             }
 
@@ -110,15 +119,18 @@ function Write-AssociationReport {
             Write-Information ("User Choice:    {0}" -f ($resolved ?? '<not set>')) -InformationAction Continue
             Write-Information ("System Default: {0}" -f ($Snapshot.RegistryValues.SystemDefault ?? '<undefined>')) -InformationAction Continue
             Write-Information ("Valid Handlers: {0}" -f $Snapshot.HandlerPaths.Count) -InformationAction Continue
-            $mruStatus = if ($stateTable[[AssociationState]::CorruptMRUOrder]) { 'Compromised' } else { 'Intact' }
+            
+            # Use the stateTable (built from Evidence) to check for CorruptMRUOrder
+            $mruStatus = if ($stateTable.ContainsKey([AssociationState]::CorruptMRUOrder)) { 'Compromised' } else { 'Intact' }
             Write-Information ("MRU Integrity:  {0}" -f $mruStatus) -InformationAction Continue
         }
 
         'Summary' {
-            $status = if ($Diagnosis.ActiveStates.Count -eq 0) {
+            # Use Evidence.Count instead of ActiveStates.Count
+            $status = if ($Diagnosis.Evidence.Count -eq 0) {
                 "[+]"
             } else {
-                "[!] {0} issue(s)" -f $Diagnosis.ActiveStates.Count
+                "[!] {0} issue(s)" -f $Diagnosis.Evidence.Count
             }
             Write-Information ("{0}: {1}" -f $Snapshot.Extension.PadRight(8), $status) -InformationAction Continue
 

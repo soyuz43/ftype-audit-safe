@@ -21,12 +21,13 @@
     PowerShellVersion = '5.1'
 
     # Functions to export from this module
-    FunctionsToExport = @(
-        'Get-PlatformContext',
-        'Get-SafeSemioticMap',
-        'Invoke-SafeClean',
-        'Show-TechnicalReport'
+    FunctionsToExport = @( # <-- Corrected List Below
+        'Get-AssociationSnapshot',
+        'Test-AssociationHealth',
+        'Write-AssociationReport',
+        'Repair-Association'
     )
+    # End of corrected list
 
     # Cmdlets to export from this module
     CmdletsToExport = @()
@@ -41,6 +42,7 @@
     PrivateData = @{
         PSData = @{
             Tags = @('FileAssociation', 'PowerShell', 'Registry', 'Security', 'Audit')
+            # Note: Removed extra spaces at the end of URLs
             LicenseUri = 'https://opensource.org/licenses/MIT'
             ProjectUri = 'https://github.com/soyuz43/ftype-audit-safe'
             IconUri = ''
