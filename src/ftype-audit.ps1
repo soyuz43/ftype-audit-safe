@@ -304,6 +304,7 @@ if ($Clean -or $DryRun) {
             try {
                 # Map relevant parameters:
                 # - $snapshot -> -Map
+                # - $diagnosis -> -Diagnosis
                 # - $Backup -> -Backup
                 # - $SkipConfirmation -> -Force (to bypass internal ShouldContinue prompt)
                 # - $BackupPath is handled by Backup-RegistryState if needed, or ignored if Backup-RegistryState uses its default.
@@ -311,7 +312,7 @@ if ($Clean -or $DryRun) {
                 #    potentially override the BackupPath parameter within Backup-RegistryState itself before the call,
                 #    or modify Invoke-SafeClean to accept and pass a custom backup path. For now, we rely on the default
                 #    behavior of Backup-RegistryState which creates a file like ".\ftype-backup-*.reg".
-                Invoke-SafeClean -Map $snapshot -Backup:$Backup -Force:$SkipConfirmation
+                Invoke-SafeClean -Map $snapshot -Diagnosis $diagnosis -Backup:$Backup -Force:$SkipConfirmation
             } catch {
                 Write-Error "[X] Repair failed: $($_.Exception.Message)" -Category OperationStopped
                 exit 1
