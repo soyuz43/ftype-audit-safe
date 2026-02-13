@@ -1,224 +1,190 @@
-# 📘 FtypeAudit Documentation
+# FtypeAudit
 
-**Secure File Association Management for Windows**  
-*Version 1.0.0 | MIT License* |
-[GitHub Repository](https://github.com/soyuz43/ftype-audit-safe)
-
----
-
-##  Overview
-
-FtypeAudit is a PowerShell-based toolkit for:
-- 🔍 **Analyzing** file type associations
-- 🧹 **Cleaning** invalid registry entries
-Built with safety-first principles and enterprise-grade auditing capabilities.
+Secure File Association Management for Windows
+Version 1.0.0 | MIT License
+Repository: [https://github.com/soyuz43/ftype-audit-safe](https://github.com/soyuz43/ftype-audit-safe)
 
 ---
 
-## 🛠 Installation
+## Overview
 
-### Method 1: Script Deployment
+FtypeAudit is a PowerShell toolkit for auditing and repairing Windows file association configuration.
+
+It provides:
+
+* Deterministic inspection of registry association layers
+* Safe mutation controls with backup and simulation modes
+* Structured output suitable for automation and reporting
+* Separation of audit and repair operations
+
+The tool is designed for controlled, reversible registry operations.
+
+---
+
+## Requirements
+
+* Windows 10/11 or Windows Server 2016+
+* PowerShell 5.1+
+* Execution Policy: `RemoteSigned`
+* Administrative privileges recommended for system-wide repair
+
+---
+
+## Installation
+
+### Script Deployment
+
+Download and execute locally:
+
 ```powershell
-# Download and run directly
-irm https://ftypeaudit.example.com/latest.ps1 | iex
+.\ftype-audit.ps1
 ```
 
-### Method 2: Module Installation
+### Module Installation
+
 ```powershell
-# Install from PowerShell Gallery
 Install-Module -Name FtypeAudit -Scope CurrentUser
-
-# Manual module placement
-Copy-Item -Path .\FtypeAudit -Destination $env:PSModulePath -Recurse
+Import-Module FtypeAudit
 ```
 
-**Requirements**:
-- PowerShell 5.1+ (Windows 10/11, Server 2016+)
-- Execution Policy: `RemoteSigned`
-- Admin Rights: Recommended for system-wide analysis
+Manual installation:
 
----
-
-## 🔥 Core Features
-
-| Feature | Description | Safety Level |
-|---------|-------------|--------------|
-| `Elevation Guard` | Warns when running unprivileged | ⚠️ Advisory |
-| `Dry-Run Mode` | Preview changes without execution | 🛡️ Protected |
-| `Registry Backup` | Automatic .REG file snapshots | 🔄 Reversible |
-| `Signature Validation` | Verify script integrity via PGP | 🔐 Trusted |
-| `MRU Forensics` | Detect historical handler drift | 🔍 Investigative |
-
----
-
-## 🖥 Basic Usage
-
-### 1. Analyze Associations
 ```powershell
-# Single extension analysis
-Get-FileAssociation -Extension .pdf -Verbose
+Copy-Item .\FtypeAudit -Destination $env:PSModulePath -Recurse
+```
 
-# Full system scan
+---
+
+## Operational Model
+
+FtypeAudit separates:
+
+1. Audit (read-only analysis)
+2. Simulation (dry-run repair preview)
+3. Controlled repair (with optional backup)
+
+Registry writes are never performed unless explicitly requested.
+
+---
+
+## Core Commands
+
+### Inspect Associations
+
+```powershell
+Get-FileAssociation -Extension .pdf
 Invoke-FullAssociationAudit -OutputFormat JSON
 ```
 
-### 2. Cleanup Workflow
-```powershell
-# Safe removal of invalid entries
-Clear-AssociationArtifacts -Extension .docx -BackupPath ~/backups
+### Cleanup and Repair
 
-# Force repair with confirmation
-Repair-FileHandlers -Extension .ps1 -Force -Confirm:$false
+```powershell
+Clear-AssociationArtifacts -Extension .docx -Backup
+Repair-FileHandlers -Extension .ps1 -Force
 ```
 
-### 3. System Integration
-```powershell
-# Export settings for compliance
-Export-AssociationPolicy -Path .\policy.json
+### Policy Export / Import
 
-# Import organizational standards
+```powershell
+Export-AssociationPolicy -Path .\policy.json
 Import-AssociationPolicy -Path .\enterprise_rules.json
 ```
 
 ---
 
-## 📋 Command Reference
+## Safety Controls
 
-### Primary Commands
+| Control              | Description                                     |
+| -------------------- | ----------------------------------------------- |
+| Dry-Run Mode         | Simulates changes without registry modification |
+| Backup Mode          | Creates .reg snapshot before mutation           |
+| Elevation Guard      | Warns when insufficient privileges detected     |
+| Signature Validation | Verifies script authenticity                    |
+| WhatIf Support       | Uses native PowerShell simulation semantics     |
 
-| Command | Parameters | Output |
-|---------|------------|--------|
-| `Get-FileAssociation` | `-Extension`, `-Depth` | Object |
-| `Clear-AssociationArtifacts` | `-Backup`, `-Force` | Log |
-| `Compare-AssociationProfiles` | `-Source`, `-Target` | Diff |
-
-### Common Options
-
-| Flag | Purpose |
-|------|---------|
-| `-WhatIf` | Simulation mode |
-| `-Historical` | Show 30-day changes |
-| `-DigitalSignature` | Verify code signature |
+Repairs are reversible when backup mode is enabled.
 
 ---
 
-## 🚨 Security
+## Automation Integration
 
-### Critical Considerations
-1. **Registry Edits**: Always validate backups
-   ```powershell
-   New-RegistryCheckpoint -Name "PreAudit"
-   ```
-2. **Signature Verification**
-   ```powershell
-   Get-AuthenticodeSignature .\FtypeAudit.ps1 | Verify-Signature
-   ```
-3. **Least Privilege**  
-   Run user-level audits first:
-   ```powershell
-   Invoke-UserScopeAnalysis -CurrentUser
-   ```
+### Scheduled Audit
 
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<script>mermaid.initialize({ startOnLoad: true });</script>
-
-<div class="mermaid">
-graph LR
-A[Start Audit] --> B{Admin Needed?}
-B -->|No| C[User-Level Scan]
-B -->|Yes| D[Elevated Session]
-C --> E[Review Findings]
-D --> E
-E --> F{Changes Required?}
-F -->|Yes| G[Backup → Dry-Run → Apply]
-F -->|No| H[Generate Report]
-</div>
-
----
-
-## 🧩 Advanced Scenarios
-
-### 1. Pipeline Integration
 ```powershell
-# Bulk handler repair
-Get-ChildItem *.log | ForEach-Object {
-    Get-FileAssociation $_.Extension |
-    Repair-FileHandlers -Policy Strict
-}
-```
-
-### 2. Enterprise Automation
-```powershell
-# Scheduled audit task
-Register-ScheduledJob -Name "DailyFtypeCheck" -ScriptBlock {
+Register-ScheduledJob -Name "DailyFtypeAudit" -ScriptBlock {
     Import-Module FtypeAudit
     Invoke-FullAssociationAudit |
     Export-Clixml "\\server\audits\$(Get-Date -Format yyyyMMdd).xml"
 } -Trigger (New-JobTrigger -Daily -At 2AM)
 ```
 
-### 3. Forensic Analysis
+### Pipeline Use
+
 ```powershell
-# Compare user vs system defaults
-$user = Get-FileAssociation .pdf -Scope CurrentUser
-$system = Get-FileAssociation .pdf -Scope AllUsers
-Compare-AssociationProfiles -Reference $user -Difference $system
+Invoke-FullAssociationAudit -OutputFormat JSON |
+    ConvertFrom-Json |
+    Where-Object { $_.State -ne "Healthy" }
+```
+
+Non-zero exit codes should be implemented for CI integration.
+
+---
+
+## Security Considerations
+
+* Always verify backups before repair.
+* Validate script signature when running in restricted environments.
+* Prefer user-scope audits before system-wide changes.
+* Do not disable execution policies for convenience.
+
+Example:
+
+```powershell
+Get-AuthenticodeSignature .\FtypeAudit.ps1
 ```
 
 ---
 
-## 🚑 Troubleshooting
+## Troubleshooting
 
-### Common Issues
+### Access Denied
 
-| Symptom | Solution |
-|---------|----------|
-| Access Denied | Run as Admin → `Start-Process powershell -Verb RunAs` |
-| Missing Handlers | `Restore-DefaultHandlers -Extension .xlsx` |
-| Ghost Entries | `Clear-AssociationArtifacts -Force -Backup` |
+Run elevated:
 
-### Diagnostic Commands
 ```powershell
-# Registry health check
+Start-Process powershell -Verb RunAs
+```
+
+### Restore Defaults
+
+```powershell
+Restore-DefaultHandlers -Extension .xlsx
+```
+
+### Validate Registry Store
+
+```powershell
 Test-AssociationStore -Scope AllUsers
-
-# Handler resolution test
-Resolve-FileHandler -Path example.rtf -Simulate
 ```
 
 ---
 
-## ❓ FAQ
+## Scope
 
-**Q: How to handle UWP app associations?**  
-A: Use `Get-AppxHandlers` for modern apps:
-```powershell
-Get-AppxHandlers -Package *Microsoft.Paint*
-```
+FtypeAudit manages Windows file association registry layers, including:
 
-**Q: Why can't I modify certain associations?**  
-A: Some system-protected types require Group Policy overrides.
+* UserChoice
+* System defaults
+* MRU ordering
+* Handler resolution
 
-**Q: Cross-user association management?**  
-A: Use `-Scope` parameter:
-```powershell
-Get-FileAssociation .mp3 -Scope AllUsers
-```
+It does not override Group Policy–enforced associations unless explicitly permitted.
 
 ---
 
-## 📜 License
+## License
 
-```text
 MIT License
 Copyright (c) 2024 William Stetar
 
-Permission is hereby granted... (standard MIT terms)
-```
-
-*For full license text, see [LICENSE.md](https://github.com/soyuz43/ftype-audit-safe/blob/main/LICENSE)*
-
----
-
-**Need Help?**  
-[Open an Issue](https://github.com/soyuz43/ftype-audit-safe/issues) | 
+See LICENSE.md for full terms.
