@@ -73,13 +73,26 @@ function Invoke-SafeClean {
     }
 
     # --- Interactive Confirmation ---
-    if (-not $Force) {
-        $proceed = $PSCmdlet.ShouldContinue(
-            "Proceed with cleaning ghost handlers for extension '$($Map.Extension)'?",
-            'Confirm Cleanup'
-        )
-        if (-not $proceed) {
-            Write-Information "[>] Cleanup skipped by user" -InformationAction Continue
+    # Only prompt when the caller has NOT suppressed confirmation. Passing
+    # -Confirm:$false is an explicit opt-out (used by automation and tests);
+    # otherwise ask interactively, falling back to a warning + abort in
+    # non-interactive hosts where ShouldContinue() would throw a
+    # NullReferenceException due to a null internal UI object.
+    $confirmRequested = -not $PSBoundParameters.ContainsKey('Confirm') -or $PSBoundParameters['Confirm']
+
+    if (-not $Force -and $confirmRequested) {
+        if ([Environment]::UserInteractive -and $Host.UI.RawUI) {
+            $proceed = $PSCmdlet.ShouldContinue(
+                "Proceed with cleaning ghost handlers for extension '$($Map.Extension)'?",
+                'Confirm Cleanup'
+            )
+            if (-not $proceed) {
+                Write-Information "[>] Cleanup skipped by user" -InformationAction Continue
+                return
+            }
+        }
+        else {
+            Write-Warning "Non-interactive session detected: confirmation prompt unavailable. Re-run with -Force to proceed."
             return
         }
     }
