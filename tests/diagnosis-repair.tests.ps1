@@ -168,6 +168,19 @@ Describe "Invoke-SafeClean" {
         Should -Invoke -CommandName Remove-ItemProperty -Times 0 -Exactly
     }
 
+    It 'Aborts cleanup when backup reports failure via return value (no exception)' {
+        # Regression: Backup-RegistryState catches its own errors and RETURNS
+        # $false instead of throwing. The old try/catch-only logic treated a
+        # falsy return as success and silently cleaned with no backup at all.
+        Mock Backup-RegistryState { return $false }
+        Mock Remove-ItemProperty { }
+
+        { Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -Confirm:$false *>$null } |
+            Should -Throw -ExpectedMessage '*Backup failed*'
+
+        Should -Invoke -CommandName Remove-ItemProperty -Times 0 -Exactly
+    }
+
     It 'Continues cleanup after a backup failure when -Force is set' {
         Mock Backup-RegistryState { throw 'access denied' }
         Mock Remove-ItemProperty { }
@@ -175,6 +188,19 @@ Describe "Invoke-SafeClean" {
         { Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -Force -Confirm:$false *>$null } |
             Should -Not -Throw
 
+        Should -Invoke -CommandName Remove-ItemProperty -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'e'
+        }
+    }
+
+    It 'Cleans normally when backup succeeds' {
+        Mock Backup-RegistryState { return $true }
+        Mock Remove-ItemProperty { }
+
+        { Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -Confirm:$false *>$null } |
+            Should -Not -Throw
+
+        Should -Invoke -CommandName Backup-RegistryState -Times 1 -Exactly
         Should -Invoke -CommandName Remove-ItemProperty -Times 1 -Exactly -ParameterFilter {
             $Name -eq 'e'
         }

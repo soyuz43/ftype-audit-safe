@@ -99,13 +99,25 @@ function Invoke-SafeClean {
 
     # --- Optional Registry Backup ---
     if ($Backup) {
+        # Track failure via an explicit flag instead of relying on exception
+        # propagation alone: Backup-RegistryState catches its own errors and
+        # RETURNS $false rather than throwing, so a bare try/catch would let a
+        # failed backup slip through silently and clean without one.
+        $backupOk = $false
+        $backupErr = $null
         try {
             # Pass the extension and the custom BackupPath to Backup-RegistryState
-            Backup-RegistryState -ext $Map.Extension -BackupPath $BackupPath -ErrorAction Stop | Out-Null
-            Write-Verbose "[>] Registry backup completed to '$BackupPath'."
+            $result = Backup-RegistryState -ext $Map.Extension -BackupPath $BackupPath -ErrorAction Stop
+            # Treat anything other than an explicit success as a failure.
+            $backupOk = [bool]$result
         }
         catch {
-            $msg = "[!] Backup failed: $($_.Exception.Message)"
+            $backupErr = $_.Exception.Message
+        }
+
+        if (-not $backupOk) {
+            $msg = if ($backupErr) { "[!] Backup failed: $backupErr" }
+                   else             { "[!] Backup failed: Backup-RegistryState reported failure (no backup file written)." }
             if ($Force) {
                 # Caller explicitly opted into risky cleanup: warn and continue.
                 Write-Warning $msg
@@ -116,6 +128,9 @@ function Invoke-SafeClean {
                 # to tolerate this should wrap the invocation in try/catch.
                 throw "[X] $msg Aborting."
             }
+        }
+        else {
+            Write-Verbose "[>] Registry backup completed to '$BackupPath'."
         }
     }
 
