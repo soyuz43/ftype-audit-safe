@@ -107,10 +107,14 @@ function Invoke-SafeClean {
         catch {
             $msg = "[!] Backup failed: $($_.Exception.Message)"
             if ($Force) {
+                # Caller explicitly opted into risky cleanup: warn and continue.
                 Write-Warning $msg
             }
             else {
-                Write-Error "[X] $msg. Aborting."; return
+                # Throw (not Write-Error) so the abort is terminating regardless
+                # of the caller's global ErrorActionPreference; callers that want
+                # to tolerate this should wrap the invocation in try/catch.
+                throw "[X] $msg Aborting."
             }
         }
     }

@@ -156,12 +156,27 @@ Describe "Invoke-SafeClean" {
         Should -Invoke -CommandName Remove-ItemProperty -Times 0 -Exactly
     }
 
-    It "Aborts actual cleanup when backup fails and -Force is not set" {
+    It 'Aborts actual cleanup when backup fails and -Force is not set' {
         Mock Backup-RegistryState { throw 'access denied' }
         Mock Remove-ItemProperty { }
 
-        Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -Confirm:$false -WhatIf:$false *>$null
+        # Invoke-SafeClean signals the abort by throwing; ensure it does,
+        # and that no registry writes happened before the abort.
+        { Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -Force:$false -Confirm:$false -WhatIf:$false *>$null } |
+            Should -Throw -ExpectedMessage '*Backup failed*'
 
         Should -Invoke -CommandName Remove-ItemProperty -Times 0 -Exactly
+    }
+
+    It 'Continues cleanup after a backup failure when -Force is set' {
+        Mock Backup-RegistryState { throw 'access denied' }
+        Mock Remove-ItemProperty { }
+
+        { Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -Force -Confirm:$false *>$null } |
+            Should -Not -Throw
+
+        Should -Invoke -CommandName Remove-ItemProperty -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'e'
+        }
     }
 }
