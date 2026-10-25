@@ -47,20 +47,10 @@ function Invoke-SafeClean {
     $openWithPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$($Map.Extension)\OpenWithList"
 
     # --- Identify ghost handlers based on Diagnosis ---
-    # The HandlerPaths dictionary contains successfully resolved handlers.
-    # Ghosts are the handler *keys* (like 'a', 'b') associated with BrokenHandlerPath evidence.
-    $brokenHandlerEvidence = $Diagnosis.Evidence | Where-Object { $_.State -eq [AssociationState]::BrokenHandlerPath }
-    # Extract the handler keys (e.g., 'a', 'b') from the descriptive message.
-    # This assumes the message format is consistent, e.g., "Handler resolution failed: <keyname>"
-    # A more robust way would be to pass the key names directly or store them differently during diagnosis.
-    # For now, we parse the key name from the message.
-    $ghostKeys = $brokenHandlerEvidence | ForEach-Object {
-        # Example message: "Handler resolution failed: a"
-        # Extract the last part after the colon and space
-        if ($_.Message -match ':\s*([a-z])$') {
-            return $matches[1]
-        }
-    } | Where-Object { $_ } # Filter out $null results if regex fails
+    # Test-AssociationHealth records the exact OpenWithList keys (e.g. 'a', 'b')
+    # whose handler values failed to resolve in Diagnosis.BrokenHandlerKeys.
+    # We consume that structured data directly — no message parsing required.
+    $ghostKeys = @($Diagnosis.BrokenHandlerKeys)
 
     # --- Dry-Run Preview ---
     if ($DryRun) {
