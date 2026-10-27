@@ -33,7 +33,12 @@ function Get-AssociationSnapshot {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidatePattern('^\.[a-z0-9]{1,10}$')]
+        # This pattern must stay consistent with Get-ValidatedExtension in
+        # src/ftype-audit.ps1, which uses '^\.[A-Za-z0-9](?:[\w-]{0,254})$'.
+        # The two disagreed: the script accepted '.my-ext' and long
+        # extensions, then the snapshot rejected them with exit code 3 and a
+        # confusing parameter-validation message.
+        [ValidatePattern('^\.[A-Za-z0-9][\w-]{0,254}$')]
         [string]$Extension
     )
 
@@ -55,9 +60,17 @@ function Get-AssociationSnapshot {
         # Access issues ignored; consider logging if needed
     }
 
-    # Capture system default ProgID; use Get-Item/GetValue to avoid brittle '(default)' property
+    # Capture system default ProgID; use Get-Item/GetValue to avoid brittle '(default)' property.
+    #
+    # The merged HKEY_CLASSES_ROOT view is addressed as
+    # 'Registry::HKEY_CLASSES_ROOT\...'. The 'HKCR:' PSDrive is not mounted in
+    # PowerShell 7, and on this machine it is not present in Windows
+    # PowerShell 5.1 either - so the old 'HKCR:\' path threw "Cannot find
+    # drive" and the catch block silently swallowed it. SystemDefault was
+    # therefore always empty in live runs, which quietly disabled the
+    # UnregisteredProgId check in Test-AssociationHealth.
     try {
-        $key = Get-Item "HKCR:\$($snapshot.Extension)" -ErrorAction Stop
+        $key = Get-Item "Registry::HKEY_CLASSES_ROOT\$($snapshot.Extension)" -ErrorAction Stop
         $snapshot.RegistryValues.SystemDefault = $key.GetValue('')
         $snapshot.HasData = $true
     }

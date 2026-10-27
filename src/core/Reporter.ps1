@@ -1,4 +1,4 @@
-# src\core\Reporter.ps1
+﻿# src\core\Reporter.ps1
 
 #  Helper: Resolve a ProgID like 'AppX...' to a friendly app name (e.g., "Notepad")
 function Resolve-ProgIdToAppName {
@@ -115,9 +115,20 @@ function Write-AssociationReport {
 
             Write-Information "`nREGISTRY ANALYSIS:" -InformationAction Continue
 
-            $resolved = Resolve-ProgIdToAppName $Snapshot.RegistryValues.UserChoice?.ProgId
-            Write-Information ("User Choice:    {0}" -f ($resolved ?? '<not set>')) -InformationAction Continue
-            Write-Information ("System Default: {0}" -f ($Snapshot.RegistryValues.SystemDefault ?? '<undefined>')) -InformationAction Continue
+            # Note: the null-coalescing operators '?.' and '??' are PowerShell 7
+            # only. The module manifest declares PowerShellVersion 5.1, so the
+            # equivalent explicit checks are used here instead.
+            $userChoiceProgId = $null
+            if ($Snapshot.RegistryValues.UserChoice) {
+                $userChoiceProgId = $Snapshot.RegistryValues.UserChoice.ProgId
+            }
+            $resolved = Resolve-ProgIdToAppName $userChoiceProgId
+            if (-not $resolved) { $resolved = '<not set>' }
+            Write-Information ("User Choice:    {0}" -f $resolved) -InformationAction Continue
+
+            $systemDefault = $Snapshot.RegistryValues.SystemDefault
+            if (-not $systemDefault) { $systemDefault = '<undefined>' }
+            Write-Information ("System Default: {0}" -f $systemDefault) -InformationAction Continue
             Write-Information ("Valid Handlers: {0}" -f $Snapshot.HandlerPaths.Count) -InformationAction Continue
             
             # Use the stateTable (built from Evidence) to check for CorruptMRUOrder

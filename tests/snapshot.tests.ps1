@@ -61,6 +61,34 @@ Describe "Get-AssociationSnapshot" {
             $snap.RegistryValues.SystemDefault | Should -Be 'sysfile'
         }
 
+        It "Reads the system default from the merged HKEY_CLASSES_ROOT view" {
+            # Regression: the snapshot used to read 'HKCR:\<ext>'. The HKCR
+            # PSDrive is not mounted in PowerShell 7, and is absent in Windows
+            # PowerShell 5.1 on this machine too, so Get-Item threw "Cannot
+            # find drive" and the catch block swallowed it. SystemDefault was
+            # always empty in live runs, which silently disabled the
+            # UnregisteredProgId check downstream.
+            #
+            # The mock above returns the same object for any path, so it could
+            # not catch this. Assert the path explicitly instead.
+            $script:capturedPath = $null
+            Mock Get-Item {
+                param($path)
+                $script:capturedPath = $path
+                $mockKey = New-Object PSObject
+                $mockKey | Add-Member -MemberType ScriptMethod -Name GetValue -Value {
+                    param($name)
+                    return 'sysfile'
+                }
+                return $mockKey
+            }
+
+            $null = Get-AssociationSnapshot -Extension .txt
+
+            $script:capturedPath | Should -Not -Match '^HKCR:'
+            $script:capturedPath | Should -Match '^Registry::HKEY_CLASSES_ROOT'
+        }
+
         It "Populates OpenWithList entries" {
             $snap = Get-AssociationSnapshot -Extension .txt
             $snap.RegistryValues.OpenWithList.a | Should -Be 'handler1'
@@ -77,6 +105,16 @@ Describe "Get-AssociationSnapshot" {
         It "Normalizes extension to lowercase" {
             $snap = Get-AssociationSnapshot -Extension '.MD'
             $snap.Extension | Should -Be '.md'
+        }
+
+        It "Accepts hyphenated and long extensions" {
+            # Regression: the snapshot's ValidatePattern was
+            # '^\.[a-z0-9]{1,10}$', which disagreed with the script's own
+            # Get-ValidatedExtension ('^\.[A-Za-z0-9](?:[\w-]{0,254})$'). The
+            # script accepted '.my-ext' and then the snapshot rejected it
+            # with exit code 3 and a parameter-validation message.
+            { Get-AssociationSnapshot -Extension '.my-ext' -ErrorAction Stop } | Should -Not -Throw
+            { Get-AssociationSnapshot -Extension '.averyveryverylongextensionname' -ErrorAction Stop } | Should -Not -Throw
         }
 
         It "Sets LastChecked to a time within the last minute" {

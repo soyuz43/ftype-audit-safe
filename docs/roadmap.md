@@ -4,7 +4,10 @@
 
 2. **System-Level Association Support**
 
-   * Extend your snapshot logic to also check (and optionally repair) HKLM associations (e.g. under `HKCR`) so corporate or machine-wide defaults are covered, not just user-level keys.
+   * Extend your snapshot logic to also check (and optionally repair) HKLM associations (e.g. under `Registry::HKEY_CLASSES_ROOT`) so corporate or machine-wide defaults are covered, not just user-level keys.
+   * Note: the merged `HKEY_CLASSES_ROOT` view is read via
+     `Registry::HKEY_CLASSES_ROOT\...`. The `HKCR:` PSDrive is not mounted in
+     PowerShell 7, and is absent in Windows PowerShell 5.1 on this machine.
 
 3. **“Clean” Interactive Preview**
 
@@ -43,9 +46,12 @@
 
     * Add an opt-in “report usage” endpoint or log hook so you can collect anonymous stats on which extensions are most commonly audited/cleaned.
 
-11. **Backup Verification**
+11. **Backup Verification** — *Done*
 
-    * After creating the `.reg` backup, parse it or test-import into a throwaway registry hive to verify it was valid before proceeding.
+    * `Backup-RegistryState` now checks the reg.exe exit code, that the file
+      exists and is non-empty, and that it parses as a registry script before
+      reporting success. A failed backup aborts the cleanup unless
+      `-AllowBackupFailure` is passed explicitly.
 
 12. **Enhance Documentation**
 

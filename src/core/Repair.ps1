@@ -1,4 +1,4 @@
-# src\core\Repair.ps1
+﻿# src\core\Repair.ps1
 
 function Invoke-SafeClean {
     <#
@@ -6,9 +6,16 @@ function Invoke-SafeClean {
             Cleans ghost file-association handlers for a given extension.
 
         .DESCRIPTION
-            Removes non-existent ProgID entries from the current user's OpenWithList.
-            Supports dry-run preview, optional registry backup, forceful execution in
-            non-interactive contexts, and verbose instrumentation.
+            Removes dead handlers from the current user's OpenWithList and repairs
+            the MRUList so it no longer references the deleted entries.
+
+            Removing a handler value without fixing MRUList leaves a dangling
+            reference, which Windows never cleans up on its own - the extension
+            stays in a corrupted state and re-running the tool finds nothing
+            left to do. Both steps are now performed together.
+
+            Supports dry-run preview, optional registry backup, forceful execution
+            in non-interactive contexts, and verbose instrumentation.
 
         .PARAMETER Map
             An [AssociationSnapshot] object describing the extension and its handlers.
@@ -18,7 +25,13 @@ function Invoke-SafeClean {
             Used to identify which specific handlers are considered broken.
 
         .PARAMETER Force
-            Bypasses interactive confirmation and continues despite backup failures.
+            Bypasses the interactive confirmation prompt. This does NOT weaken
+            backup handling - a failed backup still aborts the cleanup.
+
+        .PARAMETER AllowBackupFailure
+            Continues the cleanup even when the registry backup failed. This is
+            a separate opt-in from -Force, so that skipping the confirmation
+            prompt can never silently disable backup protection.
 
         .PARAMETER DryRun
             Shows the planned Remove-ItemProperty commands without executing them.
@@ -39,6 +52,7 @@ function Invoke-SafeClean {
         [AssociationDiagnosis]$Diagnosis,
 
         [switch]$Force,
+        [switch]$AllowBackupFailure,
         [switch]$DryRun,
         [switch]$Backup,
         [string]$BackupPath = ".\ftype-backup-$(Get-Date -Format yyyyMMdd-HHmmss).reg" # Add BackupPath parameter
@@ -60,8 +74,21 @@ function Invoke-SafeClean {
         } else {
             $ghostKeys | ForEach-Object {
                 Write-Information "    would remove handler key: $_" -InformationAction Continue
-                # In a real dry-run, you might show the specific Remove-ItemProperty command
-                # Write-Information "    Remove-ItemProperty -Path $openWithPath -Name $_" -InformationAction Continue
+            }
+
+            # Preview the MRUList rewrite that goes with it.
+            $currentMru = Get-MruListForRepair -Map $Map -OpenWithPath $openWithPath
+
+            if ($currentMru) {
+                $corrected = Get-CorrectedMruList -CurrentMruList $currentMru -RemovedKeys $ghostKeys
+                if ($corrected -ne $currentMru) {
+                    if ([string]::IsNullOrEmpty($corrected)) {
+                        Write-Information "    would remove MRUList (every referenced handler is being deleted)" -InformationAction Continue
+                    }
+                    else {
+                        Write-Information "    would rewrite MRUList: '$currentMru' -> '$corrected'" -InformationAction Continue
+                    }
+                }
             }
         }
         return
@@ -118,7 +145,7 @@ function Invoke-SafeClean {
         if (-not $backupOk) {
             $msg = if ($backupErr) { "[!] Backup failed: $backupErr" }
                    else             { "[!] Backup failed: Backup-RegistryState reported failure (no backup file written)." }
-            if ($Force) {
+            if ($AllowBackupFailure) {
                 # Caller explicitly opted into risky cleanup: warn and continue.
                 Write-Warning $msg
             }
@@ -140,10 +167,16 @@ function Invoke-SafeClean {
         return
     }
 
+    # Track which keys were actually removed. Only those may be dropped from
+    # MRUList - dropping a letter whose value survived would break a working
+    # association.
+    $removedKeys = @()
+
     foreach ($handlerKey in $ghostKeys) {
         try {
             # Remove the specific registry property (e.g., 'a', 'b') from OpenWithList
             Remove-ItemProperty -Path $openWithPath -Name $handlerKey -ErrorAction Stop
+            $removedKeys += $handlerKey
             Write-Verbose "[>] Successfully removed broken handler key '$handlerKey' for extension '$($Map.Extension)'."
         }
         catch {
@@ -153,4 +186,23 @@ function Invoke-SafeClean {
             # For now, continue trying to remove other ghosts
         }
     }
+
+    # --- Repair MRUList ---
+    # Removing a handler without fixing MRUList leaves a letter that points at
+    # a value that no longer exists. Windows preserves that dangling
+    # reference indefinitely, so the extension stays broken and the tool can
+    # never report it as clean.
+    if ($removedKeys.Count -gt 0) {
+        $currentMru = Get-MruListForRepair -Map $Map -OpenWithPath $openWithPath
+
+        if ($currentMru) {
+            $corrected = Update-MruList -OpenWithPath $openWithPath `
+                                        -CurrentMruList $currentMru `
+                                        -RemovedKeys $removedKeys `
+                                        -Confirm:$false
+            Write-Verbose "[>] MRUList for extension '$($Map.Extension)' is now '$corrected'."
+        }
+    }
 }
+
+

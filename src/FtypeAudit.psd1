@@ -3,7 +3,7 @@
     RootModule = 'FtypeAudit.psm1'
 
     # Version number of this module.
-    ModuleVersion = '1.0.0'
+    ModuleVersion = '1.2.0'
 
     # ID used to uniquely identify this module
     GUID = 'd43c7a7b-9a8a-40d5-8723-f9e8a4c21b75'
@@ -21,13 +21,13 @@
     PowerShellVersion = '5.1'
 
     # Functions to export from this module
-    FunctionsToExport = @( # <-- Corrected List Below
+    FunctionsToExport = @(
         'Get-AssociationSnapshot',
+        'Resolve-HandlerTarget',
         'Test-AssociationHealth',
         'Write-AssociationReport',
-        'Repair-Association'
+        'Invoke-SafeClean'
     )
-    # End of corrected list
 
     # Cmdlets to export from this module
     CmdletsToExport = @()
@@ -42,11 +42,10 @@
     PrivateData = @{
         PSData = @{
             Tags = @('FileAssociation', 'PowerShell', 'Registry', 'Security', 'Audit')
-            # Note: Removed extra spaces at the end of URLs
             LicenseUri = 'https://opensource.org/licenses/MIT'
             ProjectUri = 'https://github.com/soyuz43/ftype-audit-safe'
             IconUri = ''
-            ReleaseNotes = 'Initial release with registry safety features and dry-run support.'
+            ReleaseNotes = 'Repair now rewrites the OpenWithList MRUList alongside removing dead handlers, so the association no longer keeps a dangling MRU reference. Registry backups are verified before use and a failed backup aborts the cleanup unless -AllowBackupFailure is passed explicitly.'
         }
     }
 }

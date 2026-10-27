@@ -39,12 +39,18 @@ function Get-PlatformContext {
     [OutputType([pscustomobject])]
     param()
 
-    # Debug logging
-    Write-Host "[DEBUG] PSEdition: $($PSVersionTable.PSEdition)"
-    Write-Host "[DEBUG] PSVersion.Major: $($PSVersionTable.PSVersion.Major)"
-    Write-Host "[DEBUG] OS Platform: $([System.Environment]::OSVersion.Platform)"
-    Write-Host "[DEBUG] Is64BitOS: $([Environment]::Is64BitOperatingSystem)"
-    Write-Host "[DEBUG] Is64BitProcess: $([Environment]::Is64BitProcess)"
+    # Diagnostic logging.
+    #
+    # These used to be Write-Host calls, which wrote straight to the host
+    # and therefore landed in stdout. That polluted the tool's output and
+    # would corrupt any pipeline that parses stdout (the planned
+    # -LiteralJson flag, for example). Write-Verbose keeps the same
+    # information available under -Verbose while staying silent by default.
+    Write-Verbose "PSEdition: $($PSVersionTable.PSEdition)"
+    Write-Verbose "PSVersion.Major: $($PSVersionTable.PSVersion.Major)"
+    Write-Verbose "OS Platform: $([System.Environment]::OSVersion.Platform)"
+    Write-Verbose "Is64BitOS: $([Environment]::Is64BitOperatingSystem)"
+    Write-Verbose "Is64BitProcess: $([Environment]::Is64BitProcess)"
 
     $isElevated = $false
     try {

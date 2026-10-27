@@ -72,37 +72,74 @@ Registry writes are never performed unless explicitly requested.
 ### Inspect Associations
 
 ```powershell
-Get-FileAssociation -Extension .pdf
-Invoke-FullAssociationAudit -OutputFormat JSON
+$snapshot = Get-AssociationSnapshot -Extension '.pdf'
+$diagnosis = Test-AssociationHealth -Snapshot $snapshot
+Write-AssociationReport -Snapshot $snapshot -Diagnosis $diagnosis -Mode Explain
 ```
+
+### Resolve a Single Handler
+
+```powershell
+Resolve-HandlerTarget -Handler 'chrome.exe'
+Resolve-HandlerTarget -Handler 'VSCodium.json'
+Resolve-HandlerTarget -Handler 'Microsoft.WindowsNotepad_8wekyb3d8bbwe!App'
+```
+
+Each call returns the target the shell would launch, the method used to find
+it, and — when resolution fails — the reason.
 
 ### Cleanup and Repair
 
 ```powershell
-Clear-AssociationArtifacts -Extension .docx -Backup
-Repair-FileHandlers -Extension .ps1 -Force
+Invoke-SafeClean -Map $snapshot -Diagnosis $diagnosis -DryRun
+Invoke-SafeClean -Map $snapshot -Diagnosis $diagnosis -Backup
 ```
 
-### Policy Export / Import
+The script wrapper is a convenient front end for the same operations:
 
 ```powershell
-Export-AssociationPolicy -Path .\policy.json
-Import-AssociationPolicy -Path .\enterprise_rules.json
+.\src\ftype-audit.ps1 -Path .docx -DryRun
+.\src\ftype-audit.ps1 -Path .docx -Clean -Backup
 ```
 
 ---
 
-## Safety Controls
 
 | Control              | Description                                     |
 | -------------------- | ----------------------------------------------- |
 | Dry-Run Mode         | Simulates changes without registry modification |
 | Backup Mode          | Creates .reg snapshot before mutation           |
+| Backup Failure       | Aborts the cleanup unless `-AllowBackupFailure` is set |
 | Elevation Guard      | Warns when insufficient privileges detected     |
-| Signature Validation | Verifies script authenticity                    |
+| Handler Resolution   | Follows the shell lookup chain, not file existence |
 | WhatIf Support       | Uses native PowerShell simulation semantics     |
 
 Repairs are reversible when backup mode is enabled.
+
+`-SkipConfirmation` suppresses the interactive prompt only. It does **not**
+weaken backup protection: if the backup cannot be written and verified, the
+cleanup is aborted. Continuing past a failed backup requires the explicit
+`-AllowBackupFailure` opt-in, which is off by default.
+
+### MRUList Repair
+
+The `OpenWithList` key carries an `MRUList` value — the handlers in
+most-recently-used order, encoded as letters. Windows preserves that order and
+never recomputes it, so removing a dead handler without fixing `MRUList`
+leaves a dangling reference that Windows will not clean up on its own.
+
+The repair removes the dead handler values and rewrites `MRUList` in the same
+pass, dropping exactly the letters whose values were removed and preserving
+the recency order of the survivors. Sparse letter sequences are normal and are
+left alone; only genuinely dangling references are treated as corruption.
+
+```powershell
+# Preview both the removals and the MRUList rewrite
+.\src\ftype-audit.ps1 -Path .txt -DryRun
+
+# Apply, and stop before mutating if the backup cannot be verified
+.\src\ftype-audit.ps1 -Path .txt -Clean -Backup
+```
 
 ---
 
@@ -113,35 +150,42 @@ Repairs are reversible when backup mode is enabled.
 ```powershell
 Register-ScheduledJob -Name "DailyFtypeAudit" -ScriptBlock {
     Import-Module FtypeAudit
-    Invoke-FullAssociationAudit |
-    Export-Clixml "\\server\audits\$(Get-Date -Format yyyyMMdd).xml"
+    'txt', 'pdf', 'docx' | ForEach-Object {
+        $snapshot = Get-AssociationSnapshot -Extension $_
+        $diagnosis = Test-AssociationHealth -Snapshot $snapshot
+        [pscustomobject]@{
+            Extension = $_
+            Issues    = $diagnosis.Evidence.Count
+            Evidence  = $diagnosis.Evidence
+        }
+    } | Export-Clixml "\\server\audits\$(Get-Date -Format yyyyMMdd).xml"
 } -Trigger (New-JobTrigger -Daily -At 2AM)
 ```
 
 ### Pipeline Use
 
 ```powershell
-Invoke-FullAssociationAudit -OutputFormat JSON |
-    ConvertFrom-Json |
-    Where-Object { $_.State -ne "Healthy" }
+'txt', 'pdf' | ForEach-Object {
+    $snapshot = Get-AssociationSnapshot -Extension $_
+    $diagnosis = Test-AssociationHealth -Snapshot $snapshot
+    if ($diagnosis.Evidence.Count -gt 0) {
+        [pscustomobject]@{ Extension = $_; Issues = $diagnosis.Evidence }
+    }
+}
 ```
 
-Non-zero exit codes should be implemented for CI integration.
+The script wrapper exits with a non-zero code on validation failure, which makes
+it usable as a CI gate.
 
 ---
 
-## Security Considerations
 
 * Always verify backups before repair.
-* Validate script signature when running in restricted environments.
+* The tool is not code-signed; rely on `-DryRun` and `-Backup` instead.
 * Prefer user-scope audits before system-wide changes.
 * Do not disable execution policies for convenience.
 
-Example:
 
-```powershell
-Get-AuthenticodeSignature .\FtypeAudit.ps1
-```
 
 ---
 
@@ -155,19 +199,58 @@ Run elevated:
 Start-Process powershell -Verb RunAs
 ```
 
-### Restore Defaults
+### Inspect a Single Handler
+
+When a handler is reported as broken, resolve it directly to see why:
 
 ```powershell
-Restore-DefaultHandlers -Extension .xlsx
+Resolve-HandlerTarget -Handler 'chrome.exe'
 ```
 
-### Validate Registry Store
+The result distinguishes the failure modes that matter:
+
+| Status | Meaning |
+|--------|---------|
+| `Resolved` | The shell can launch this handler |
+| `NotRegistered` | No application registration exists at all |
+| `NotOpenable` | Registered, but with no verb that can open a document |
+| `TargetMissing` | Registered, but the target executable was uninstalled |
+| `Malformed` | The stored value is not a shape Windows understands |
+
+### Validate a Backup
+
+`.reg` backups can be checked without touching the registry:
 
 ```powershell
-Test-AssociationStore -Scope AllUsers
+# Confirm the file is a well-formed registry script
+Get-Content .\ftype-backup-20260101-120000.reg -TotalCount 1
+# Windows Registry Editor Version 5.00
+
+# Inspect which keys it would restore, without importing it
+Select-String -Path .\ftype-backup-20260101-120000.reg -Pattern '^\['
 ```
 
----
+Do **not** use `reg.exe import` to validate a backup. Importing writes the
+keys back into the live registry, overwriting the current state with the
+backup. Use it only to restore deliberately, and only after confirming the
+file contains the keys you expect.
+
+### MRU References a Handler That Does Not Exist
+
+This shows up as `CorruptMRUOrder` in the evidence output. It means the
+`MRUList` names a letter that has no matching `OpenWithList` value.
+
+Windows does not repair this on its own — restarting Explorer, broadcasting an
+association change, or re-opening the file all leave the dangling reference
+in place. The repair step fixes it: run `-Clean` and the `MRUList` is
+rewritten alongside the handler removal.
+
+```powershell
+.\src\ftype-audit.ps1 -Path .txt -Explain    # see the dangling letters
+.\src\ftype-audit.ps1 -Path .txt -DryRun     # see the planned rewrite
+.\src\ftype-audit.ps1 -Path .txt -Clean -Backup
+```
+
 
 ## Scope
 
@@ -187,4 +270,5 @@ It does not override Group Policy–enforced associations unless explicitly perm
 MIT License
 Copyright (c) 2024 William Stetar
 
-See LICENSE.md for full terms.
+See LICENSE for full terms.
+

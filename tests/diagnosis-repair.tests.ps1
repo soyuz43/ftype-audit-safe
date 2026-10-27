@@ -5,6 +5,7 @@
 Describe "Test-AssociationHealth" {
     BeforeAll {
         . (Join-Path $PSScriptRoot '../src/core/Snapshot.ps1')
+        . (Join-Path $PSScriptRoot '../src/core/HandlerResolver.ps1')
         . (Join-Path $PSScriptRoot '../src/core/Diagnosis.ps1')
     }
 
@@ -101,6 +102,8 @@ Describe "Test-AssociationHealth" {
 Describe "Invoke-SafeClean" {
     BeforeAll {
         . (Join-Path $PSScriptRoot '../src/core/Snapshot.ps1')
+        . (Join-Path $PSScriptRoot '../src/core/HandlerResolver.ps1')
+        . (Join-Path $PSScriptRoot '../src/core/MruList.ps1')
         . (Join-Path $PSScriptRoot '../src/core/Diagnosis.ps1')
         . (Join-Path $PSScriptRoot '../src/core/Repair.ps1')
         . (Join-Path $PSScriptRoot '../src/core/RegistryHelpers.ps1')
@@ -181,16 +184,29 @@ Describe "Invoke-SafeClean" {
         Should -Invoke -CommandName Remove-ItemProperty -Times 0 -Exactly
     }
 
-    It 'Continues cleanup after a backup failure when -Force is set' {
+    It 'Continues cleanup after a backup failure when -AllowBackupFailure is set' {
         Mock Backup-RegistryState { throw 'access denied' }
         Mock Remove-ItemProperty { }
 
-        { Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -Force -Confirm:$false *>$null } |
+        { Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -AllowBackupFailure -Force -Confirm:$false *>$null } |
             Should -Not -Throw
 
         Should -Invoke -CommandName Remove-ItemProperty -Times 1 -Exactly -ParameterFilter {
             $Name -eq 'e'
         }
+    }
+
+    It 'Still aborts when the backup fails and only -Force is set' {
+        # Regression: -Force used to double as "continue despite a failed
+        # backup", so a script that merely suppressed the confirmation prompt
+        # would silently clean the registry with no backup at all.
+        Mock Backup-RegistryState { throw 'access denied' }
+        Mock Remove-ItemProperty { }
+
+        { Invoke-SafeClean -Map $snap -Diagnosis $diag -Backup -Force -Confirm:$false *>$null } |
+            Should -Throw -ExpectedMessage '*Backup failed*'
+
+        Should -Invoke -CommandName Remove-ItemProperty -Times 0 -Exactly
     }
 
     It 'Cleans normally when backup succeeds' {
@@ -206,3 +222,6 @@ Describe "Invoke-SafeClean" {
         }
     }
 }
+
+
+

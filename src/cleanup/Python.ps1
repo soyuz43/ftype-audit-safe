@@ -1,4 +1,4 @@
-# src\cleanup\Python.ps1
+﻿# src\cleanup\Python.ps1
 
 # Ensure the platform context is available
 # This assumes the script is run from within the project structure
@@ -190,8 +190,29 @@ function Remove-ResidualPython {
             if ($WhatIf) {
                 Write-Host "🧪 Would remove: $path" -ForegroundColor Cyan
             }
-            elseif ($Confirm -and -not (Read-Host "Delete $path? (Y/N)") -match '^y(es)?$') { # Improved confirmation check
-                Write-Host "⏭️ Skipped $path" -ForegroundColor Yellow
+            elseif ($Confirm) {
+                # Note: the parentheses around the -match are load-bearing.
+                # The previous condition was
+                #
+                #     -not (Read-Host ...) -match '^y(es)?$'
+                #
+                # which PowerShell parses as '(-not $Answer) -match ...', not
+                # '-not ($Answer -match ...)'. '-not' binds tighter than
+                # '-match', so the expression was always $false: the "skip"
+                # branch could never be taken and answering "n" deleted the
+                # path anyway. The prompt is now explicit and only "y"/"yes"
+                # (case-insensitive) proceeds with the deletion.
+                $answer = Read-Host "Delete $path? (Y/N)"
+                if ($answer -notmatch '^\s*y(es)?\s*$') {
+                    Write-Host "⏭️ Skipped $path" -ForegroundColor Yellow
+                    continue
+                }
+                try {
+                    Remove-Item -Recurse -Force $path -ErrorAction Stop
+                    Write-Host "🗑️ Deleted: $path" -ForegroundColor Green
+                } catch {
+                    Write-Host "❌ Failed to delete: $path - $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
             else {
                 try {

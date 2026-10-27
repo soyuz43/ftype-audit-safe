@@ -1,4 +1,4 @@
-# src\core\Diagnosis.ps1
+﻿# src\core\Diagnosis.ps1
 
 # --- Type definitions ---------------------------------------
 enum AssociationState {
@@ -6,6 +6,7 @@ enum AssociationState {
     InvalidProgIdSyntax
     UnregisteredProgId
     BrokenHandlerPath
+    InertHandlerPath
     CorruptMRUOrder
 }
 
@@ -17,10 +18,17 @@ class AssociationDiagnosis {
     # so repair logic never has to parse human-readable messages.
     [System.Collections.Generic.List[string]]$BrokenHandlerKeys
 
+    # Handlers that resolve to a live registration but cannot actually open a
+    # document (registered with no 'open' verb). These are reported but are
+    # deliberately NOT treated as broken, because Explorer owns them and would
+    # simply re-create them.
+    [System.Collections.Generic.List[string]]$InertHandlerKeys
+
     AssociationDiagnosis() {
         # Initialize an empty list to hold state/message entries
         $this.Evidence = [System.Collections.Generic.List[PSCustomObject]]::new()
         $this.BrokenHandlerKeys = [System.Collections.Generic.List[string]]::new()
+        $this.InertHandlerKeys = [System.Collections.Generic.List[string]]::new()
     }
 
     [void] RegisterState([AssociationState]$State, [string]$Message) {
@@ -32,15 +40,27 @@ class AssociationDiagnosis {
         $this.Evidence.Add($entry)
     }
 
-    [void] RegisterBrokenHandler([string]$Key, [string]$Handler) {
+    [void] RegisterBrokenHandler([string]$Key, [string]$Handler, [string]$Reason) {
         # Record the broken handler both as display evidence and as a machine-usable key
         $entry = [PSCustomObject]@{
             State   = [AssociationState]::BrokenHandlerPath
-            Message = "Handler resolution failed: $Handler"
+            Message = "Handler resolution failed: $Handler ($Reason)"
         }
         $this.Evidence.Add($entry)
         if ($Key -and -not $this.BrokenHandlerKeys.Contains($Key)) {
             $this.BrokenHandlerKeys.Add($Key)
+        }
+    }
+
+    [void] RegisterInertHandler([string]$Key, [string]$Handler, [string]$Reason) {
+        # A handler that is registered but cannot open documents.
+        $entry = [PSCustomObject]@{
+            State   = [AssociationState]::InertHandlerPath
+            Message = "Handler registered but not openable: $Handler ($Reason)"
+        }
+        $this.Evidence.Add($entry)
+        if ($Key -and -not $this.InertHandlerKeys.Contains($Key)) {
+            $this.InertHandlerKeys.Add($Key)
         }
     }
 
@@ -75,10 +95,14 @@ function Test-AssociationHealth {
         )
     }
     else {
-        if ($Snapshot.RegistryValues.UserChoice.ProgId -notmatch '^(AppX[\w]+|\w+(\.\w+)*)$') {
+        $userChoiceProgId = [string]$Snapshot.RegistryValues.UserChoice.ProgId
+        # Validate the *shape* only. Whether the ProgID is actually registered
+        # is checked in Phase 2 - a shape check alone rejected legitimate
+        # hyphenated ProgIDs such as 'FirefoxPDF-CA9422711AE1A81C'.
+        if ($userChoiceProgId -notmatch '^[\w.\-]+$') {
             $diagnosis.RegisterState(
                 [AssociationState]::InvalidProgIdSyntax,
-                "ProgID format violation: $($Snapshot.RegistryValues.UserChoice.ProgId)"
+                "ProgID format violation: $userChoiceProgId"
             )
         }
     }
@@ -86,7 +110,10 @@ function Test-AssociationHealth {
     # Phase 2: Semantic validation
     if ($Snapshot.RegistryValues.SystemDefault) {
         $systemProgId = $Snapshot.RegistryValues.SystemDefault
-        if (-not (Test-Path "HKCR:\$systemProgId")) {
+        # Note: the "HKCR:" PSDrive is not mounted in PowerShell 7 on this
+        # platform, so Test-Path "HKCR:\..." silently returned $false for every
+        # ProgID. The merged view is reached via the provider path instead.
+        if (-not (Test-Path -LiteralPath "Registry::HKEY_CLASSES_ROOT\$systemProgId")) {
             $diagnosis.RegisterState(
                 [AssociationState]::UnregisteredProgId,
                 "System default ProgID not registered: $systemProgId"
@@ -95,36 +122,54 @@ function Test-AssociationHealth {
     }
 
     # Phase 3: Handler verification
-    $openList = $Snapshot.RegistryValues.OpenWithList
-    if ($openList) {
-        # Extract entries named 'a'..'z'
-        $entries = $openList.psobject.Properties | Where-Object { $_.Name -match '^[a-z]$' }
-        foreach ($prop in $entries) {
-            $handler = $prop.Value -replace '^"(.*)"$', '$1'
+    #
+    # Resolution is delegated to Resolve-OpenWithListHandlers, which follows
+    # the shell's own lookup chain (App Paths, Applications, ProgID, AppX).
+    # The previous inline implementation used only Test-Path and Get-Command,
+    # which misclassified every installed-but-not-on-PATH application as
+    # broken.
+    $resolutions = Resolve-OpenWithListHandlers -Snapshot $Snapshot
 
-            if (Test-Path $handler) {
-                $Snapshot.HandlerPaths[$prop.Name] = $handler
-            }
-            else {
-                try {
-                    $resolved = (Get-Command $handler -ErrorAction Stop).Source
-                    $Snapshot.HandlerPaths[$prop.Name] = $resolved
-                }
-                catch {
-                    # Register the failure with the machine-readable OpenWithList key
-                    # so Repair can target exactly this entry without parsing messages.
-                    $diagnosis.RegisterBrokenHandler($prop.Name, $handler)
-                }
-            }
+    foreach ($key in @($resolutions.Keys | Sort-Object)) {
+        $resolution = $resolutions[$key]
+
+        # Note: an if/elseif chain is used deliberately here. A `switch` with
+        # enum case labels does not compare by value - it compares the enum
+        # object against the case, so every branch fell through to `default`.
+        if ($resolution.Status -eq [HandlerResolution]::Resolved) {
+            $Snapshot.HandlerPaths[$key] = $resolution.ResolvedPath
+        }
+        elseif ($resolution.Status -eq [HandlerResolution]::NotOpenable) {
+            # Registered, but cannot open a document. Reported for
+            # visibility, never handed to the repair step.
+            $diagnosis.RegisterInertHandler($key, $resolution.Handler, $resolution.Detail)
+        }
+        else {
+            # NotRegistered, TargetMissing, Malformed - these are the
+            # entries the repair step is allowed to remove.
+            $diagnosis.RegisterBrokenHandler($key, $resolution.Handler, $resolution.Detail)
         }
     }
 
     # Phase 4: MRU coherence check
+    #
+    # A MRU letter is invalid when it points at a handler we know is broken,
+    # or when it references a letter with no OpenWithList value at all. The
+    # latter is the dangling-reference case the repair step must also fix.
     $mru = $Snapshot.RegistryValues.OpenWithList.MRUList
     if ($mru) {
         $mruChars = $mru -replace '[^a-z]', ''
+
         $invalidRefs = $mruChars.ToCharArray() | Where-Object {
-            -not $Snapshot.HandlerPaths.ContainsKey($_)
+            $letter = $_.ToString()
+            if ($diagnosis.BrokenHandlerKeys.Contains($letter)) {
+                return $true
+            }
+            if ($diagnosis.InertHandlerKeys.Contains($letter)) {
+                return $false
+            }
+            # Not in HandlerPaths and not registered as inert => no value.
+            return -not $Snapshot.HandlerPaths.ContainsKey($letter)
         }
 
         if ($invalidRefs) {
@@ -137,3 +182,5 @@ function Test-AssociationHealth {
 
     return $diagnosis
 }
+
+

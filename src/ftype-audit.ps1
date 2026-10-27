@@ -1,4 +1,4 @@
-# ftype-audit.ps1
+﻿# ftype-audit.ps1
 
 <#
 .SYNOPSIS
@@ -27,6 +27,10 @@ Custom location for registry backup (default: .\ftype-backup-*.reg)
 
 .PARAMETER SkipConfirmation
 Skip interactive confirmation prompts (Does NOT override critical safety logic)
+
+.PARAMETER AllowBackupFailure
+Continue the cleanup even when the registry backup failed. Off by default: a
+failed backup aborts the cleanup unless this is explicitly requested.
 
 .PARAMETER IsExtension
 Treat input Path explicitly as an extension (bypass file-exists check)
@@ -81,6 +85,9 @@ param(
     [Parameter(ParameterSetName = 'Clean', HelpMessage = 'Skip interactive confirmation prompts')]
     [switch]$SkipConfirmation,
 
+    [Parameter(ParameterSetName = 'Clean', HelpMessage = 'Continue even when the registry backup fails (dangerous)')]
+    [switch]$AllowBackupFailure,
+
     # - Shared flag (both sets)
     [Parameter(ParameterSetName = 'Analyze', HelpMessage = 'Treat Path explicitly as an extension')]
     [Parameter(ParameterSetName = 'Clean')]
@@ -114,6 +121,8 @@ if ($PSCmdlet.ParameterSetName -eq 'PythonAudit') {
 # Load helpers
 . "$PSScriptRoot\platform\PlatformContext.ps1"
 . "$PSScriptRoot\core\Snapshot.ps1"
+. "$PSScriptRoot\core\HandlerResolver.ps1"
+. "$PSScriptRoot\core\MruList.ps1"
 . "$PSScriptRoot\core\Diagnosis.ps1"
 . "$PSScriptRoot\core\Reporter.ps1"
 . "$PSScriptRoot\core\Repair.ps1"
@@ -167,6 +176,9 @@ OUTPUT MODES:
 EXECUTION CONTROL:
   -SkipConfirmation   Suppress confirmation prompts (ShouldContinue)
                       [!] Only affects -Clean or -DryRun
+                      [!] Does NOT disable backup protection
+  -AllowBackupFailure Proceed even when the registry backup fails
+                      [!] Dangerous - the association may be unrestorable
 
 HELP:
   -Help               Show this help screen
@@ -291,70 +303,35 @@ if ($Clean -or $DryRun) {
     }
 
     if ($PSCmdlet.ShouldProcess($resolvedExt, 'Repair registry association')) {
-        if ($DryRun) {
-            Write-Information '[>] Simulated repair operations:' -InformationAction Continue
-            $diagnosis.Evidence | ForEach-Object {
-                Write-Information "    would fix: $_" -InformationAction Continue
-            }
-        } else {
-            # --- Fix: Use the correct function name and adapt parameters ---
-            # The standalone script calls Invoke-SafeClean from Repair.ps1
-            # Invoke-SafeClean uses -Map (Snapshot), -Backup, -Force (for SkipConfirmation), and handles its own backup path logic.
-            # The -Diagnosis object is used by the reporter but not directly by Invoke-SafeClean's current signature.
-            try {
-                # Map relevant parameters:
-                # - $snapshot -> -Map
-                # - $diagnosis -> -Diagnosis
-                # - $Backup -> -Backup
-                # - $SkipConfirmation -> -Force (to bypass internal ShouldContinue prompt)
-                # - $BackupPath is handled by Backup-RegistryState if needed, or ignored if Backup-RegistryState uses its default.
-                #    If you need to pass a custom path to Backup-RegistryState, you'd need to modify Invoke-SafeClean or
-                #    potentially override the BackupPath parameter within Backup-RegistryState itself before the call,
-                #    or modify Invoke-SafeClean to accept and pass a custom backup path. For now, we rely on the default
-                #    behavior of Backup-RegistryState which creates a file like ".\ftype-backup-*.reg".
-                Invoke-SafeClean -Map $snapshot -Diagnosis $diagnosis -Backup:$Backup -Force:$SkipConfirmation
-            } catch {
-                Write-Error "[X] Repair failed: $($_.Exception.Message)" -Category OperationStopped
-                exit 1
-            }
-            # --- End of Fix ---
+        try {
+            # Parameter mapping:
+            # - $snapshot         -> -Map
+            # - $diagnosis        -> -Diagnosis
+            # - $Backup           -> -Backup
+            # - $BackupPath       -> -BackupPath
+            # - $DryRun           -> -DryRun
+            # - $SkipConfirmation -> -Force (to bypass the internal ShouldContinue prompt)
+            #
+            # The dry run used to be handled here by printing the diagnosis
+            # evidence, which duplicated what Invoke-SafeClean already does -
+            # and did it less completely, since it never showed the MRUList
+            # rewrite. Delegating keeps the preview and the real run in step.
+            #
+            # -BackupPath also used to be dropped here, so a caller-supplied
+            # path was silently ignored and the backup landed in the default
+            # location instead.
+            Invoke-SafeClean -Map $snapshot `
+                             -Diagnosis $diagnosis `
+                             -Backup:$Backup `
+                             -BackupPath $BackupPath `
+                             -DryRun:$DryRun `
+                             -Force:$SkipConfirmation `
+                             -AllowBackupFailure:$AllowBackupFailure
+        } catch {
+            Write-Error "[X] Repair failed: $($_.Exception.Message)" -Category OperationStopped
+            exit 1
         }
     }
 }
 
-
-
-
-# SIG # Begin signature block
-# MIIFgwYJKoZIhvcNAQcCoIIFdDCCBXACAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUalIbUPRwYGy5
-# oN7U/kC8BRDfX//FVB0yHu7Vs5jofaCCAv4wggL6MIIB4qADAgECAhAgUkHtEQTC
-# q0UgHK9KUqndMA0GCSqGSIb3DQEBCwUAMBUxEzARBgNVBAMMCkZ0eXBlQXVkaXQw
-# HhcNMjUwNDE2MTg0ODEyWhcNMjYwNDE2MTkwODEyWjAVMRMwEQYDVQQDDApGdHlw
-# ZUF1ZGl0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyeTXgrocB8ed
-# zZFAi/ABqtdbI8JZs/uxYBInLmpLAtyo26jSw1bNSKRKVx8gYP7FsHydyzqi57v7
-# o57Jgy75rbT54NfthbLEn9BrACpG2psABeSfLJWjfFsLOS1anS+JX+cCv61ZHWMy
-# GSEQEfDKyABrbnvKnbrKCkbtZ2cdiGhcIEGe8PzM3JIiCchbY2qVB0NKXxLVpaPe
-# 0UfTuL2aHMMuORlioCu1o+1vgxy/73q+HPXMTzjIe0qrmVerW4l1D4uVmj4KBvav
-# F+BFReVmcnLXAA2d5HcZLcuSoi1jKZhVvV/TDScQKf2mt8f8sIZ2TLirqe0ft+je
-# PziAnEkeSQIDAQABo0YwRDAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYB
-# BQUHAwMwHQYDVR0OBBYEFPE86AvlpnOBJJEuRFZo5jLZWojqMA0GCSqGSIb3DQEB
-# CwUAA4IBAQCHOUJbQj8x6aF0HKRCKg7+tXI1ZeR1Bw4CYKSpSITKoVMn2+8ih7RT
-# UMkc9ehTIwW1dOK17Bcq+q4A1UpIfr6dSUVqjoRX4jRtoUD5tHK4c2gcznafZIhR
-# 75C5pLSKXguaxKKrU9qmwwj+HTToqkD4mHvLyLjcLwn9xtHwk3WhJsdR/tmE0C6d
-# ovHfahVTGCrL0O6Y8CQUqeblQKABf3dvt9IwSXkHYNk4xLMBiQEgw5o/Z3iZxIE2
-# n+g8j+8aoXOsEQ7ckIekPJUxn6rqs75GCR7XjIE1p5XfePQR7PwOwKbNPoNXmyJ8
-# U7ymxIQZEc+0EH+XHhDI6rJQvHVLz+NoMYIB2zCCAdcCAQEwKTAVMRMwEQYDVQQD
-# DApGdHlwZUF1ZGl0AhAgUkHtEQTCq0UgHK9KUqndMA0GCWCGSAFlAwQCAQUAoIGE
-# MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQB
-# gjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkE
-# MSIEIFpP8NkOAHAy/RDmm6P7UNX+uoSGYO4i6fcECFCfgKCYMA0GCSqGSIb3DQEB
-# AQUABIIBALeasSMWAmzyZ+eMI76Br9EKmV0URmq8ktoOGM1UR7cdUf/DJIFLeysg
-# xrF+5dA6pkCUIxCDPcyyFelLfzYDqWFT6RRJJi0xsqtOKdvyVAGkVCXsRg6d7ZKF
-# GCcip4vmKXG5X85xIDBVAoCwsZ9vE0WlNhUn3ZmPAFV0XoNXolSOLYiRvzaI8T4p
-# jMLIuGPwpC0LIbu0MnTWBlrM6pA4I4tgP5WKcDMGLyXGpEQzkvFDv2RuaLQXyZvQ
-# iBQ9TqTR6Mcp7A60YJ1zpRj00j225l5Zs+QWn2cnHfD0bUfcMlzFD3gULLq2a0P0
-# /q/ebj8g24zZS8lAgIOkQMTqhJFlRVI=
-# SIG # End signature block
 
