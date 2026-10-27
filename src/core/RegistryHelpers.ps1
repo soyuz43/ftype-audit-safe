@@ -1,15 +1,14 @@
 # src\core\RegistryHelpers.ps1
-# Shared utilities for registry operations, CI detection, and standard exit codes
+# Shared utilities for registry operations and CI detection.
+
+# Note: the exit codes used to be declared here as 'enum ExitCode', with
+# UnsupportedEnvironment = 1. That numbering contradicted the script's own
+# documentation, which described 1 as "user cancellation / bad interactive
+# input" and used 3 for validation failure. The canonical contract now lives
+# in src/core/ExitCode.ps1 as 'AuditExitCode'.
 
 function Test-CI {
     return ($env:CI -eq 'true')
-}
-
-enum ExitCode {
-    Success = 0
-    UnsupportedEnvironment = 1
-    RegistryAccessFailure = 2
-    InsufficientElevation = 3
 }
 
 function Backup-RegistryState {

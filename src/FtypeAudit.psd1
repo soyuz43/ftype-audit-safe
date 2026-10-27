@@ -3,7 +3,7 @@
     RootModule = 'FtypeAudit.psm1'
 
     # Version number of this module.
-    ModuleVersion = '1.2.0'
+    ModuleVersion = '1.3.0'
 
     # ID used to uniquely identify this module
     GUID = 'd43c7a7b-9a8a-40d5-8723-f9e8a4c21b75'
@@ -26,7 +26,16 @@
         'Resolve-HandlerTarget',
         'Test-AssociationHealth',
         'Write-AssociationReport',
-        'Invoke-SafeClean'
+        'Invoke-SafeClean',
+        'Invoke-AuditRun',
+        'Invoke-AssociationAudit',
+        'Resolve-ExtensionList',
+        'New-AuditJsonDocument',
+        'Add-RepairPlanToJsonDocument',
+        'ConvertTo-AuditJson',
+        'Get-JsonSchemaVersion',
+        'Get-AuditExitCode',
+        'Get-WorstExitCode'
     )
 
     # Cmdlets to export from this module
@@ -45,7 +54,7 @@
             LicenseUri = 'https://opensource.org/licenses/MIT'
             ProjectUri = 'https://github.com/soyuz43/ftype-audit-safe'
             IconUri = ''
-            ReleaseNotes = 'Repair now rewrites the OpenWithList MRUList alongside removing dead handlers, so the association no longer keeps a dangling MRU reference. Registry backups are verified before use and a failed backup aborts the cleanup unless -AllowBackupFailure is passed explicitly.'
+            ReleaseNotes = 'Automation support: -Json emits a machine-readable document with a stable schema version, -OutputPath writes it to a file, -FailOnIssues turns a finding into a non-zero exit code for CI gating, and -Path now accepts a comma-separated list of extensions. The exit code contract distinguishes a failed audit from a finding.'
         }
     }
 }

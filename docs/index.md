@@ -145,6 +145,65 @@ left alone; only genuinely dangling references are treated as corruption.
 
 ## Automation Integration
 
+### Script Interface
+
+The script wrapper exposes the automation features directly:
+
+```powershell
+# Audit several extensions in one pass
+.\src\ftype-audit.ps1 -Path .txt,.pdf,.docx
+
+# Machine-readable output
+.\src\ftype-audit.ps1 -Path .txt,.pdf -Json
+.\src\ftype-audit.ps1 -Path .txt -Json -OutputPath .\audit.json
+
+# Fail the job when an association has unresolved issues
+.\src\ftype-audit.ps1 -Path .txt -FailOnIssues
+```
+
+An entry in the list that cannot be validated is reported and skipped rather
+than aborting the run.
+
+#### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Audit completed, no issues found |
+| `1` | The requested operation could not be completed |
+| `2` | Registry access was denied |
+| `3` | The input failed validation |
+| `4` | Issues were found (only with `-FailOnIssues`) |
+| `5` | Unsupported environment |
+
+The distinction matters for automation. An audit that *finds* a broken
+association has done its job successfully, so it exits `0` by default. Use
+`-FailOnIssues` to promote a finding into a process failure:
+
+```powershell
+.\src\ftype-audit.ps1 -Path .txt -FailOnIssues
+switch ($LASTEXITCODE) {
+    0 { 'All associations healthy' }
+    4 { 'Issues found - repair required'; exit 1 }
+}
+```
+
+### JSON Output
+
+`-Json` emits a document with a `schemaVersion`, so consumers can check the
+shape rather than assume it:
+
+```powershell
+$doc = .\src\ftype-audit.ps1 -Path .txt,.pdf -Json | ConvertFrom-Json
+$doc.extensions | Where-Object { -not $_.healthy } | ForEach-Object {
+    "{0}: {1} issue(s)" -f $_.extension, $_.issueCount
+}
+```
+
+Enum values are emitted as names (`NotRegistered`, `CorruptMRUOrder`), never
+as ordinals. In JSON mode stdout contains only the document; notices and
+warnings go to stderr, so the output can be piped straight into
+`ConvertFrom-Json`.
+
 ### Scheduled Audit
 
 ```powershell

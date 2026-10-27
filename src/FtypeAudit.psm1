@@ -11,6 +11,9 @@
 . "$PSScriptRoot\core\Reporter.ps1"
 . "$PSScriptRoot\core\Repair.ps1"
 . "$PSScriptRoot\core\RegistryHelpers.ps1"
+. "$PSScriptRoot\core\ExitCode.ps1"
+. "$PSScriptRoot\core\JsonOutput.ps1"
+. "$PSScriptRoot\core\AuditRun.ps1"
 
 # ── Export Public API ────────────────────────────────
 Export-ModuleMember -Function `
@@ -18,4 +21,13 @@ Export-ModuleMember -Function `
     Resolve-HandlerTarget,
     Test-AssociationHealth,
     Write-AssociationReport,
-    Invoke-SafeClean
+    Invoke-SafeClean,
+    Invoke-AuditRun,
+    Invoke-AssociationAudit,
+    Resolve-ExtensionList,
+    New-AuditJsonDocument,
+    Add-RepairPlanToJsonDocument,
+    ConvertTo-AuditJson,
+    Get-JsonSchemaVersion,
+    Get-AuditExitCode,
+    Get-WorstExitCode

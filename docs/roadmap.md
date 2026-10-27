@@ -1,6 +1,10 @@
-1. **JSON-Structured Output**
+1. **JSON-Structured Output** - *Done*
 
-   * Add a `-LiteralJson` flag that dumps the snapshot and repair plan as JSON. This makes it easy to consume in CI pipelines or other automation tools.
+   * `-Json` emits a versioned document containing the snapshot, the
+     diagnosis, the per-handler resolution results, and the repair plan.
+     `-OutputPath` writes it to a file. The flag is named `-Json` rather than
+     `-LiteralJson`, since `-Literal` already means "raw technical output" in
+     this tool and the two would have been confusingly similar.
 
 2. **System-Level Association Support**
 
@@ -30,13 +34,27 @@
      * Populating and validating `HandlerPaths` entries
      * Simulated clean vs. actual clean
 
-7. **Error Handling & Reporting**
+7. **Error Handling & Reporting** - *Partially done*
 
-   * Surface specific error codes or structured errors when registry access fails (e.g. access denied vs. key missing), so callers can react programmatically.
+    * The exit code contract now distinguishes a failed audit from a finding,
+      and separates validation failure, registry access failure, unsupported
+      environment, and operation failure. See the exit code table in
+      `docs/index.md`.
 
-8. **Bulk / File-Path Mode**
+    * Still to do: surface the individual registry errors (access denied vs.
+      key missing) inside the JSON document, rather than only as a combined
+      failure count.
 
-   * Allow passing a file path (not just an extension) and automatically extract its extension, or handle multiple extensions in one run (e.g. `-Path .txt,.md`).
+8. **Bulk / File-Path Mode** - *Done*
+
+    * `-Path` accepts a comma-separated list of extensions (e.g.
+      `-Path .txt,.md`) and audits each in one pass. An entry that cannot be
+      validated is reported and skipped rather than aborting the run. A
+      single file path was already supported and still is.
+
+    * The exit code contract now distinguishes a failed audit from a finding,
+      and `-FailOnIssues` promotes a finding into a process failure for CI
+      gating.
 
 9. **Localization / Internationalization**
 
