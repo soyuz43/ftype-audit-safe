@@ -47,20 +47,10 @@ function Invoke-SafeClean {
     $openWithPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$($Map.Extension)\OpenWithList"
 
     # --- Identify ghost handlers based on Diagnosis ---
-    # The HandlerPaths dictionary contains successfully resolved handlers.
-    # Ghosts are the handler *keys* (like 'a', 'b') associated with BrokenHandlerPath evidence.
-    $brokenHandlerEvidence = $Diagnosis.Evidence | Where-Object { $_.State -eq [AssociationState]::BrokenHandlerPath }
-    # Extract the handler keys (e.g., 'a', 'b') from the descriptive message.
-    # This assumes the message format is consistent, e.g., "Handler resolution failed: <keyname>"
-    # A more robust way would be to pass the key names directly or store them differently during diagnosis.
-    # For now, we parse the key name from the message.
-    $ghostKeys = $brokenHandlerEvidence | ForEach-Object {
-        # Example message: "Handler resolution failed: a"
-        # Extract the last part after the colon and space
-        if ($_.Message -match ':\s*([a-z])$') {
-            return $matches[1]
-        }
-    } | Where-Object { $_ } # Filter out $null results if regex fails
+    # Test-AssociationHealth records the exact OpenWithList keys (e.g. 'a', 'b')
+    # whose handler values failed to resolve in Diagnosis.BrokenHandlerKeys.
+    # We consume that structured data directly — no message parsing required.
+    $ghostKeys = @($Diagnosis.BrokenHandlerKeys)
 
     # --- Dry-Run Preview ---
     if ($DryRun) {
@@ -83,32 +73,64 @@ function Invoke-SafeClean {
     }
 
     # --- Interactive Confirmation ---
-    if (-not $Force) {
-        $proceed = $PSCmdlet.ShouldContinue(
-            "Proceed with cleaning ghost handlers for extension '$($Map.Extension)'?",
-            'Confirm Cleanup'
-        )
-        if (-not $proceed) {
-            Write-Information "[>] Cleanup skipped by user" -InformationAction Continue
+    # Only prompt when the caller has NOT suppressed confirmation. Passing
+    # -Confirm:$false is an explicit opt-out (used by automation and tests);
+    # otherwise ask interactively, falling back to a warning + abort in
+    # non-interactive hosts where ShouldContinue() would throw a
+    # NullReferenceException due to a null internal UI object.
+    $confirmRequested = -not $PSBoundParameters.ContainsKey('Confirm') -or $PSBoundParameters['Confirm']
+
+    if (-not $Force -and $confirmRequested) {
+        if ([Environment]::UserInteractive -and $Host.UI.RawUI) {
+            $proceed = $PSCmdlet.ShouldContinue(
+                "Proceed with cleaning ghost handlers for extension '$($Map.Extension)'?",
+                'Confirm Cleanup'
+            )
+            if (-not $proceed) {
+                Write-Information "[>] Cleanup skipped by user" -InformationAction Continue
+                return
+            }
+        }
+        else {
+            Write-Warning "Non-interactive session detected: confirmation prompt unavailable. Re-run with -Force to proceed."
             return
         }
     }
 
     # --- Optional Registry Backup ---
     if ($Backup) {
+        # Track failure via an explicit flag instead of relying on exception
+        # propagation alone: Backup-RegistryState catches its own errors and
+        # RETURNS $false rather than throwing, so a bare try/catch would let a
+        # failed backup slip through silently and clean without one.
+        $backupOk = $false
+        $backupErr = $null
         try {
             # Pass the extension and the custom BackupPath to Backup-RegistryState
-            Backup-RegistryState -ext $Map.Extension -BackupPath $BackupPath -ErrorAction Stop | Out-Null
-            Write-Verbose "[>] Registry backup completed to '$BackupPath'."
+            $result = Backup-RegistryState -ext $Map.Extension -BackupPath $BackupPath -ErrorAction Stop
+            # Treat anything other than an explicit success as a failure.
+            $backupOk = [bool]$result
         }
         catch {
-            $msg = "[!] Backup failed: $($_.Exception.Message)"
+            $backupErr = $_.Exception.Message
+        }
+
+        if (-not $backupOk) {
+            $msg = if ($backupErr) { "[!] Backup failed: $backupErr" }
+                   else             { "[!] Backup failed: Backup-RegistryState reported failure (no backup file written)." }
             if ($Force) {
+                # Caller explicitly opted into risky cleanup: warn and continue.
                 Write-Warning $msg
             }
             else {
-                Write-Error "[X] $msg. Aborting."; return
+                # Throw (not Write-Error) so the abort is terminating regardless
+                # of the caller's global ErrorActionPreference; callers that want
+                # to tolerate this should wrap the invocation in try/catch.
+                throw "[X] $msg Aborting."
             }
+        }
+        else {
+            Write-Verbose "[>] Registry backup completed to '$BackupPath'."
         }
     }
 
