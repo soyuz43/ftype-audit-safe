@@ -118,6 +118,7 @@ Describe "Resolve-ExtensionList" {
 
 Describe "Invoke-AuditRun" {
     BeforeAll {
+        . (Join-Path $PSScriptRoot 'TestFixtures.ps1')
         . (Join-Path $PSScriptRoot '../src/core/Snapshot.ps1')
         . (Join-Path $PSScriptRoot '../src/core/HandlerResolver.ps1')
         . (Join-Path $PSScriptRoot '../src/core/Diagnosis.ps1')
@@ -126,14 +127,42 @@ Describe "Invoke-AuditRun" {
     }
 
     It "Returns a result for each extension" {
-        $run = Invoke-AuditRun -Extensions @('.txt', '.pdf')
-        $run.Results.Count | Should -Be 2
-        $run.Failures.Count | Should -Be 0
+        $fixture = New-TestBrokenExtension
+        try {
+            $run = Invoke-AuditRun -Extensions @($fixture.Extension, '.pdf')
+
+            $run.Results.Count | Should -Be 2
+            $run.Failures.Count | Should -Be 0
+        }
+        finally {
+            Remove-TestFixture -Fixture $fixture
+        }
     }
 
     It "Combines the exit codes across extensions" {
-        $run = Invoke-AuditRun -Extensions @('.txt', '.pdf')
-        $run.ExitCode | Should -Be ([int][AuditExitCode]::IssuesFound)
+        # A synthetic broken extension is used rather than a real one like
+        # '.txt'. Whether '.txt' has issues depends on the machine running
+        # the test, so asserting on it made this test fail on a clean CI
+        # runner while passing on a developer machine.
+        $fixture = New-TestBrokenExtension
+        try {
+            $run = Invoke-AuditRun -Extensions @($fixture.Extension)
+            $run.ExitCode | Should -Be ([int][AuditExitCode]::IssuesFound)
+        }
+        finally {
+            Remove-TestFixture -Fixture $fixture
+        }
+    }
+
+    It "Reports the broken handler it found" {
+        $fixture = New-TestBrokenExtension
+        try {
+            $run = Invoke-AuditRun -Extensions @($fixture.Extension)
+            $run.Results[0].Diagnosis.BrokenHandlerKeys | Should -Contain $fixture.HandlerKey
+        }
+        finally {
+            Remove-TestFixture -Fixture $fixture
+        }
     }
 
     It "Returns Success for an empty extension list" {

@@ -7,6 +7,7 @@
 
 Describe "ftype-audit.ps1 command line" {
     BeforeAll {
+        . (Join-Path $PSScriptRoot 'TestFixtures.ps1')
         $script:ScriptPath = Join-Path $PSScriptRoot '../src/ftype-audit.ps1'
         $script:ResolvedScriptPath = (Resolve-Path $script:ScriptPath).Path
 
@@ -64,12 +65,22 @@ Describe "ftype-audit.ps1 command line" {
         }
 
         It "Reports the audit outcome separately from the process exit code" {
-            $result = Invoke-AuditScript -Arguments @('.txt', '-Json')
-            $doc = $result.StdOut | ConvertFrom-Json
+            # A synthetic broken extension is used rather than '.txt'.
+            # Whether '.txt' has issues depends on the machine running the
+            # test, so asserting on it made this test fail on a clean CI
+            # runner while passing on a developer machine.
+            $fixture = New-TestBrokenExtension
+            try {
+                $result = Invoke-AuditScript -Arguments @($fixture.Extension, '-Json')
+                $doc = $result.StdOut | ConvertFrom-Json
 
-            $doc.exitCode | Should -Be 4
-            $doc.processExitCode | Should -Be 0
-            $result.ExitCode | Should -Be 0
+                $doc.exitCode | Should -Be 4
+                $doc.processExitCode | Should -Be 0
+                $result.ExitCode | Should -Be 0
+            }
+            finally {
+                Remove-TestFixture -Fixture $fixture
+            }
         }
 
         It "Writes the document to a file when -OutputPath is given" {
@@ -125,38 +136,68 @@ Describe "ftype-audit.ps1 command line" {
         It "Emits parseable JSON and includes the repair plan" {
             # Regression: the dry-run preview written by Invoke-SafeClean went
             # to stdout, which made the JSON document unparseable.
-            $result = Invoke-AuditScript -Arguments @('.txt', '-DryRun', '-Json')
+            $fixture = New-TestBrokenExtension
+            try {
+                $result = Invoke-AuditScript -Arguments @($fixture.Extension, '-DryRun', '-Json')
 
-            { $result.StdOut | ConvertFrom-Json } | Should -Not -Throw
-            $doc = $result.StdOut | ConvertFrom-Json
-            $doc.mode | Should -Be 'dryRun'
-            $doc.extensions[0].repair.applied | Should -BeFalse
-            $doc.extensions[0].repair.plannedRemovals | Should -Contain 'b'
-            $doc.extensions[0].repair.plannedMruList | Should -Not -BeNullOrEmpty
+                { $result.StdOut | ConvertFrom-Json } | Should -Not -Throw
+                $doc = $result.StdOut | ConvertFrom-Json
+                $doc.mode | Should -Be 'dryRun'
+                $doc.extensions[0].repair.applied | Should -BeFalse
+                $doc.extensions[0].repair.plannedRemovals | Should -Contain $fixture.HandlerKey
+                $doc.extensions[0].repair.currentMruList | Should -Be $fixture.HandlerKey
+                # The fixture has a single handler and it is the one being
+                # removed, so no MRU letter survives. The plan is to drop the
+                # MRUList value entirely, which is why the planned value is
+                # empty rather than the original letter.
+                $doc.extensions[0].repair.plannedMruList | Should -Be ''
+                $doc.extensions[0].repair.mruListWillChange | Should -BeTrue
+            }
+            finally {
+                Remove-TestFixture -Fixture $fixture
+            }
         }
 
         It "Does not modify the registry" {
-            $before = Get-Item 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt\OpenWithList'
-            $beforeValue = $before.GetValue('b')
-            $beforeMru = $before.GetValue('MRUList')
+            $fixture = New-TestBrokenExtension
+            try {
+                $before = Get-Item -LiteralPath $fixture.OpenWithPath
+                $beforeValue = $before.GetValue($fixture.HandlerKey)
+                $beforeMru = $before.GetValue('MRUList')
 
-            $null = Invoke-AuditScript -Arguments @('.txt', '-DryRun', '-Json')
+                $null = Invoke-AuditScript -Arguments @($fixture.Extension, '-DryRun', '-Json')
 
-            $after = Get-Item 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt\OpenWithList'
-            $after.GetValue('b') | Should -Be $beforeValue
-            $after.GetValue('MRUList') | Should -Be $beforeMru
+                $after = Get-Item -LiteralPath $fixture.OpenWithPath
+                $after.GetValue($fixture.HandlerKey) | Should -Be $beforeValue
+                $after.GetValue('MRUList') | Should -Be $beforeMru
+            }
+            finally {
+                Remove-TestFixture -Fixture $fixture
+            }
         }
     }
 
     Context "Exit codes" {
         It "Exits 0 when issues are found but -FailOnIssues is not set" {
-            $result = Invoke-AuditScript -Arguments @('.txt')
-            $result.ExitCode | Should -Be 0
+            $fixture = New-TestBrokenExtension
+            try {
+                $result = Invoke-AuditScript -Arguments @($fixture.Extension)
+                $result.ExitCode | Should -Be 0
+            }
+            finally {
+                Remove-TestFixture -Fixture $fixture
+            }
         }
 
         It "Exits 4 when issues are found and -FailOnIssues is set" {
-            $result = Invoke-AuditScript -Arguments @('.txt', '-FailOnIssues')
-            $result.ExitCode | Should -Be 4
+            $fixture = New-TestBrokenExtension
+            try {
+                $result = Invoke-AuditScript -Arguments @($fixture.Extension, '-FailOnIssues')
+                $result.ExitCode | Should -Be 4
+            }
+            finally {
+                Remove-TestFixture -Fixture $fixture
+            }
         }
 
         It "Exits 3 when the extension is invalid" {
