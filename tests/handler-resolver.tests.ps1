@@ -177,17 +177,24 @@ Describe "Resolve-OpenWithListHandlers" {
 
 Describe "Handler resolution in Test-AssociationHealth" {
     BeforeAll {
+        . (Join-Path $PSScriptRoot 'TestFixtures.ps1')
         . (Join-Path $PSScriptRoot '../src/core/Snapshot.ps1')
         . (Join-Path $PSScriptRoot '../src/core/HandlerResolver.ps1')
         . (Join-Path $PSScriptRoot '../src/core/Diagnosis.ps1')
     }
 
     It "Treats a registered but non-openable ProgID as inert, not broken" {
-        # txtfilelegacy is registered in HKCR with only a 'printto' verb.
+        # A real ProgID is registered here on purpose. The previous version
+        # used 'txtfilelegacy', which happens to have only a 'printto' verb
+        # on a typical Windows install - but that is a property of the host
+        # machine, not of the code under test. On a clean CI runner the
+        # ProgID may resolve differently, and the test failed there.
+        $progId = New-TestProgIdWithVerb -Verb 'printto'
+        try {
         $snap = [AssociationSnapshot]::new()
         $snap.Extension = '.demo'
         $snap.RegistryValues.OpenWithList = [PSCustomObject]@{
-            a       = 'txtfilelegacy'
+            a       = $progId
             MRUList = 'a'
         }
 
@@ -198,6 +205,10 @@ Describe "Handler resolution in Test-AssociationHealth" {
         # It gets its own state so it is not confused with a dead handler.
         $diag.Evidence.State | Should -Contain 'InertHandlerPath'
         $diag.Evidence.State | Should -Not -Contain 'BrokenHandlerPath'
+        }
+        finally {
+            Remove-TestFixture -ProgId $progId
+        }
     }
 
     It "Marks an unregistered ProgID as broken" {

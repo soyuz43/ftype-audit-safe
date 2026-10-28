@@ -51,11 +51,18 @@ Explanation of Layers
 | `-Clean`            | Perform safe cleanup of file association entries              |
 | `-SkipConfirmation` | Skip interactive confirmation prompts (affects -Clean, -DryRun)|
 | `-AllowBackupFailure` | Continue the cleanup even when the registry backup failed. Off by default; a failed backup aborts the cleanup. |
+| `-Json`             | Emit a machine-readable JSON document on stdout                |
+| `-OutputPath`       | Write the JSON document to a file instead of stdout             |
+| `-FailOnIssues`     | Exit with code 4 when issues are found — turns the tool into a CI gate |
 | `-Explain`          | Display analysis of file association conflicts                |
 | `-Literal`          | Output raw technical details only                             |
 | `-IsExtension`      | Treat input Path explicitly as an extension (bypass file-exists check) |
 | `-AuditPython`      | Run Python residue audit and exit                             |
 | `-Help`             | Show detailed help screen                                       |
+
+`Path` also accepts a comma-separated list, so `.txt,.pdf,.docx` audits all
+three in one run. An entry that cannot be validated is reported and skipped
+rather than aborting the whole run.
 
 #### 🧾 **Example Output**
 
@@ -124,6 +131,102 @@ treated as corruption.
 
 Run the same repair twice and the second run is a no-op: the tool reports the
 extension as valid with `MRU Integrity: Intact`.
+
+#### Automation & CI
+
+`Path` accepts a comma-separated list, so several extensions can be audited
+in one pass:
+
+```powershell
+.\src\ftype-audit.ps1 .txt,.pdf,.docx
+```
+
+An entry that cannot be validated is reported and skipped rather than
+aborting the run - a typo in one entry does not hide the state of the others.
+
+##### JSON output
+
+`-Json` writes a machine-readable document to stdout:
+
+```powershell
+.\src\ftype-audit.ps1 .txt -Json
+.\src\ftype-audit.ps1 .txt,.pdf -Json -OutputPath .\audit.json
+```
+
+The document carries a `schemaVersion`, so a consumer can branch on the shape
+instead of guessing:
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-27T18:27:02.4854489-05:00",
+  "mode": "analyze",
+  "extensions": [
+    {
+      "schemaVersion": 1,
+      "extension": ".txt",
+      "capturedAt": "2026-10-27T18:27:01.4043799-05:00",
+      "healthy": false,
+      "issueCount": 2,
+      "registry": {
+        "userChoiceProgId": "AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw",
+        "systemDefault": "txtfilelegacy",
+        "mruList": "afgbcde",
+        "openWithList": { "a": "chrome.exe", "b": "aebdc" }
+      },
+      "handlers": [
+        {
+          "key": "b",
+          "handler": "aebdc",
+          "status": "NotRegistered",
+          "resolvedPath": "",
+          "method": "None",
+          "detail": "No ProgID registration found for 'aebdc'",
+          "isBroken": true
+        }
+      ],
+      "evidence": [
+        { "state": "BrokenHandlerPath", "message": "Handler resolution failed: aebdc (...)" }
+      ],
+      "brokenHandlers": [ "b" ],
+      "inertHandlers": []
+    }
+  ],
+  "failures": [],
+  "invalidInputs": [],
+  "exitCode": 4,
+  "processExitCode": 0
+}
+```
+
+Enum values are emitted as their names (`NotRegistered`), never as ordinals,
+so the document survives a reordering of the underlying enum. In JSON mode
+stdout contains nothing but the document - notices go to stderr.
+
+##### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Audit completed, no issues found |
+| `1` | The requested operation could not be completed |
+| `2` | Registry access was denied |
+| `3` | The input failed validation |
+| `4` | Issues were found (only with `-FailOnIssues`) |
+| `5` | Unsupported environment |
+
+By default an audit that *finds* issues still exits `0`: the tool did its job,
+and the findings are in the output. `-FailOnIssues` promotes a finding to a
+process failure, which is what a CI gate wants:
+
+```powershell
+# Fails the CI job if .txt has unresolved issues
+.\src\ftype-audit.ps1 .txt -FailOnIssues
+if ($LASTEXITCODE -eq 4) { Write-Host 'Association needs repair' }
+```
+
+The JSON document reports both numbers separately: `exitCode` is the audit
+outcome (always `4` when issues exist), and `processExitCode` is what the
+process returns.
 
 
 
@@ -217,3 +320,12 @@ Exported functions:
 | `Test-AssociationHealth` | Diagnose the captured state |
 | `Write-AssociationReport` | Render a snapshot and diagnosis in Literal/Explain/Summary modes |
 | `Invoke-SafeClean` | Remove dead handlers, with dry-run and backup support |
+| `Invoke-AuditRun` | Audit a list of extensions and return structured results |
+| `Invoke-AssociationAudit` | Audit a single extension and return its result |
+| `Resolve-ExtensionList` | Validate and normalize one or more extension inputs |
+| `New-AuditJsonDocument` | Build the JSON document for an audit result |
+| `Add-RepairPlanToJsonDocument` | Attach the repair plan to a JSON document |
+| `ConvertTo-AuditJson` | Serialize a document to JSON text |
+| `Get-JsonSchemaVersion` | Return the current JSON schema version |
+| `Get-AuditExitCode` | Map a diagnosis to an audit outcome code |
+| `Get-WorstExitCode` | Combine several exit codes into the most significant one |

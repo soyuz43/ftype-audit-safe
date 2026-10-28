@@ -33,8 +33,13 @@ function Invoke-SafeClean {
             a separate opt-in from -Force, so that skipping the confirmation
             prompt can never silently disable backup protection.
 
-        .PARAMETER DryRun
-            Shows the planned Remove-ItemProperty commands without executing them.
+    .PARAMETER DryRun
+        Shows the planned Remove-ItemProperty commands without executing them.
+
+    .PARAMETER Quiet
+        Suppresses the preview output. Used when the caller is emitting a
+        machine-readable document, where the preview text would corrupt
+        stdout.
 
         .PARAMETER Backup
             Creates a backup of the relevant registry branch before modification.
@@ -54,6 +59,7 @@ function Invoke-SafeClean {
         [switch]$Force,
         [switch]$AllowBackupFailure,
         [switch]$DryRun,
+        [switch]$Quiet,
         [switch]$Backup,
         [string]$BackupPath = ".\ftype-backup-$(Get-Date -Format yyyyMMdd-HHmmss).reg" # Add BackupPath parameter
     )
@@ -68,25 +74,27 @@ function Invoke-SafeClean {
 
     # --- Dry-Run Preview ---
     if ($DryRun) {
-        Write-Information "[>] Simulated repair operations for extension '$($Map.Extension)':" -InformationAction Continue
-        if ($ghostKeys.Count -eq 0) {
-             Write-Information "    No broken handlers found to remove." -InformationAction Continue
-        } else {
-            $ghostKeys | ForEach-Object {
-                Write-Information "    would remove handler key: $_" -InformationAction Continue
-            }
+        if (-not $Quiet) {
+            Write-Information "[>] Simulated repair operations for extension '$($Map.Extension)':" -InformationAction Continue
+            if ($ghostKeys.Count -eq 0) {
+                 Write-Information "    No broken handlers found to remove." -InformationAction Continue
+            } else {
+                $ghostKeys | ForEach-Object {
+                    Write-Information "    would remove handler key: $_" -InformationAction Continue
+                }
 
-            # Preview the MRUList rewrite that goes with it.
-            $currentMru = Get-MruListForRepair -Map $Map -OpenWithPath $openWithPath
+                # Preview the MRUList rewrite that goes with it.
+                $currentMru = Get-MruListForRepair -Map $Map -OpenWithPath $openWithPath
 
-            if ($currentMru) {
-                $corrected = Get-CorrectedMruList -CurrentMruList $currentMru -RemovedKeys $ghostKeys
-                if ($corrected -ne $currentMru) {
-                    if ([string]::IsNullOrEmpty($corrected)) {
-                        Write-Information "    would remove MRUList (every referenced handler is being deleted)" -InformationAction Continue
-                    }
-                    else {
-                        Write-Information "    would rewrite MRUList: '$currentMru' -> '$corrected'" -InformationAction Continue
+                if ($currentMru) {
+                    $corrected = Get-CorrectedMruList -CurrentMruList $currentMru -RemovedKeys $ghostKeys
+                    if ($corrected -ne $currentMru) {
+                        if ([string]::IsNullOrEmpty($corrected)) {
+                            Write-Information "    would remove MRUList (every referenced handler is being deleted)" -InformationAction Continue
+                        }
+                        else {
+                            Write-Information "    would rewrite MRUList: '$currentMru' -> '$corrected'" -InformationAction Continue
+                        }
                     }
                 }
             }

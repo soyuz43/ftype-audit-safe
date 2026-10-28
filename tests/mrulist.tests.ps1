@@ -171,6 +171,7 @@ Describe "Invoke-SafeClean repairs the MRUList" {
 
 Describe "Backup-RegistryState" {
     BeforeAll {
+        . (Join-Path $PSScriptRoot 'TestFixtures.ps1')
         . (Join-Path $PSScriptRoot '../src/core/RegistryHelpers.ps1')
     }
 
@@ -196,17 +197,26 @@ Describe "Backup-RegistryState" {
     }
 
     It "Creates a verifiable backup for a key that exists" {
+        # A synthetic extension is used rather than '.txt'. The backup
+        # exports the Explorer FileExts key for the extension, and whether
+        # that key exists for '.txt' depends on the machine running the
+        # test.
+        $fixture = New-TestBrokenExtension
         $backupPath = Join-Path $env:TEMP 'ftaudit-test-ok.reg'
         Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
 
-        $result = Backup-RegistryState -ext '.txt' -BackupPath $backupPath
+        try {
+            $result = Backup-RegistryState -ext $fixture.Extension -BackupPath $backupPath
 
-        $result | Should -BeTrue
-        Test-Path -LiteralPath $backupPath | Should -BeTrue
-        Get-Content -LiteralPath $backupPath -TotalCount 1 |
-            Should -Match '^Windows Registry Editor Version 5\.00'
-
-        Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+            $result | Should -BeTrue
+            Test-Path -LiteralPath $backupPath | Should -BeTrue
+            Get-Content -LiteralPath $backupPath -TotalCount 1 |
+                Should -Match '^Windows Registry Editor Version 5\.00'
+        }
+        finally {
+            Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+            Remove-TestFixture -Fixture $fixture
+        }
     }
 
     It "Reports failure when the backup path is a directory" {
@@ -221,11 +231,17 @@ Describe "Backup-RegistryState" {
         New-Item -ItemType Directory -Path $backupPath | Out-Null
 
         try {
-            $result = Backup-RegistryState -ext '.txt' -BackupPath $backupPath
+            $fixture = New-TestBrokenExtension
+            try {
+                $result = Backup-RegistryState -ext $fixture.Extension -BackupPath $backupPath
 
-            $result | Should -BeFalse
-            # The directory must survive - a failed backup never removes it.
-            Test-Path -LiteralPath $backupPath | Should -BeTrue
+                $result | Should -BeFalse
+                # The directory must survive - a failed backup never removes it.
+                Test-Path -LiteralPath $backupPath | Should -BeTrue
+            }
+            finally {
+                Remove-TestFixture -Fixture $fixture
+            }
         }
         finally {
             Remove-Item -LiteralPath $backupPath -Recurse -Force -ErrorAction SilentlyContinue
